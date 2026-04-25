@@ -39,7 +39,7 @@ shared types and pricing engine built and tested. No app code yet.*
 
 **Verify:** `pnpm --filter @repo/shared typecheck` exits 0.
 
-**Status:** `[ ]`
+**Status:** `[x]`
 
 ---
 
