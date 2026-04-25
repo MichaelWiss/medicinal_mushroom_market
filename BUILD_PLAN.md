@@ -74,7 +74,7 @@ dependency order, exits 0.
 **Verify:** Studio at `http://localhost:54323` shows all 8 tables.
 SQL: `SELECT count(*) FROM pg_tables WHERE schemaname='public';` → 8.
 
-**Status:** `[ ]`
+**Status:** `[x]`
 
 ---
 
