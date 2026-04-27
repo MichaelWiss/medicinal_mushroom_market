@@ -54,7 +54,7 @@ dependency order, exits 0.
 
 **Verify:** `pnpm build` from root processes packages in order.
 
-**Status:** `[ ]`
+**Status:** `[x]`
 
 ---
 
@@ -96,7 +96,7 @@ hook that injects `company_id` into JWT.
 - With test user A's JWT, query `orders` → only Co A rows.
 - With test user B's JWT, query `orders` → only Co B rows.
 
-**Status:** `[ ]`
+**Status:** `[x]` (anon-key isolation verified; cross-company JWT test deferred to Cell 1.13 once seed + auth users exist)
 
 ---
 
@@ -118,7 +118,7 @@ SELECT allocate_batch('<species_id>', 6); -- returns null (insufficient)
 SELECT allocate_batch('<species_id>', 4); -- returns same batch_id, units 0
 ```
 
-**Status:** `[ ]`
+**Status:** `[x]` (all three assertions verified via `supabase db query`; concurrent test deferred to Cell 1.12)
 
 ---
 
