@@ -16,7 +16,7 @@ export type SubLine = {
 
 export function SubscriptionsList({ initial }: { initial: SubLine[] }) {
   const [subs, setSubs] = useState(initial);
-  const toast = useToast();
+  const { toast } = useToast();
 
   const aq = (i: number, d: number) => {
     setSubs((curr) =>

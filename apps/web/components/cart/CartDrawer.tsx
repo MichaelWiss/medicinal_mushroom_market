@@ -62,7 +62,7 @@ export function CartDrawer() {
                   <div className="ci-body">
                     <div className="ci-name">{sp.name}</div>
                     <div className="ci-detail">
-                      {FMT[sp.formats[0]]} · {sp.batch} · ×{l.qty}
+                      {sp.formats[0] ? FMT[sp.formats[0]] : ''} · {sp.batch} · ×{l.qty}
                     </div>
                     <div className="ci-price">£{linePrice.toFixed(2)}</div>
                   </div>

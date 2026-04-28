@@ -72,8 +72,10 @@ export function CartProvider({ children }: { children: ReactNode }) {
       setLines((prev) => {
         const i = prev.findIndex((l) => l.id === id);
         if (i === -1) return [...prev, { id, qty: 1 }];
+        const existing = prev[i];
+        if (!existing) return [...prev, { id, qty: 1 }];
         const next = [...prev];
-        next[i] = { id, qty: next[i].qty + 1 };
+        next[i] = { id, qty: existing.qty + 1 };
         return next;
       });
       toast(`${sp.name} added to cart`);

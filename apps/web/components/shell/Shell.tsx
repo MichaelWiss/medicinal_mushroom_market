@@ -18,12 +18,13 @@ const TITLES: Record<string, string> = {
 };
 
 function titleForPath(pathname: string): string {
-  if (TITLES[pathname]) return TITLES[pathname];
+  const exact = TITLES[pathname];
+  if (exact) return exact;
   // Fall back to the longest matching prefix.
   const match = Object.keys(TITLES)
     .filter((p) => p !== '/' && pathname.startsWith(p))
     .sort((a, b) => b.length - a.length)[0];
-  return match ? TITLES[match] : 'Mycelium';
+  return (match && TITLES[match]) || 'Mycelium';
 }
 
 export function Shell({
