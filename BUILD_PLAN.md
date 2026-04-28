@@ -17,6 +17,40 @@ atomic unit of work with:
 3. Never combine cells — if it feels like two things, it is two things
 4. Mark a cell done only when the verify step passes
 5. Ask to implement each cell — nothing auto-builds
+6. **Always reference [`/demo/myellium.html`](demo/myellium.html) for visual
+   design.** It is the single source of truth for layout, colour, typography,
+   spacing, dotted-border patterns, and component markup. Every page added in
+   Phase 2+ must port its structure from this file (palette + tokens already
+   live in [apps/web/tailwind.config.ts](apps/web/tailwind.config.ts) and
+   [apps/web/app/globals.css](apps/web/app/globals.css) under `@layer
+   components`).
+
+---
+
+## Design Reference — `/demo/myellium.html`
+
+A standalone HTML/CSS prototype that defines the entire Mycelium visual
+system. **All app UI must match it.** Key conventions:
+
+- **Tokens (`:root`):** `--putty`, `--navy`, `--ink/ink2/ink3`, `--yellow`,
+  `--dot` — already mirrored in Tailwind theme + CSS vars.
+- **Type:** Cormorant Garamond (serif, italic accents) + Jost (sans, all
+  uppercase microcopy with wide letter-spacing).
+- **Dividers:** `3px dotted var(--dot)` everywhere — never solid 1px lines.
+- **Shell:** 56 px collapsed sidebar ↔ 320 px open, sticky topbar, navy
+  panel with molecule SVG art when collapsed.
+- **Component classes** ported into `globals.css`: `.ph` (page header),
+  `.fbar`/`.fp` (filter pills), `.data-tbl`/`.s-pill` (tables + status),
+  `.trace-card`/`.trace-grid`/`.tc` (batch traceability), `.kpi-row`/`.kpi`
+  + `.sub-list`/`.sub-row`/`.tog`/`.qc` (subscriptions), `.q-step`
+  (quotes/process steps), footer (`.footer-cta`, `.footer-news`,
+  `.footer-dark`).
+- **JS seed data** in `<script>` near the bottom of the file is the
+  canonical sample dataset for catalogue, orders, traceability, and
+  subscriptions — use it verbatim for stub pages until live data lands.
+
+When implementing any UI cell, open the demo first, find the matching
+section, and port markup + classes 1:1 before adding behaviour.
 
 ---
 

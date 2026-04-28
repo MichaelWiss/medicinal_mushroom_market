@@ -1,5 +1,8 @@
 import { Shell } from '@/components/shell/Shell';
-import { TopbarChip, TopbarButton, TopbarCta } from '@/components/shell/Topbar';
+import { ToastProvider } from '@/components/ui/ToastProvider';
+import { CartProvider } from '@/components/cart/CartProvider';
+import { CartDrawer } from '@/components/cart/CartDrawer';
+import { StorefrontTopbarRight } from '@/components/cart/StorefrontTopbarRight';
 
 export default function StorefrontLayout({
   children,
@@ -7,17 +10,11 @@ export default function StorefrontLayout({
   children: React.ReactNode;
 }) {
   return (
-    <Shell
-      topbarTitle="Species catalogue"
-      topbarRight={
-        <>
-          <TopbarChip>Next dispatch Mon 27 Apr</TopbarChip>
-          <TopbarButton>Request quote</TopbarButton>
-          <TopbarCta count={0}>Cart</TopbarCta>
-        </>
-      }
-    >
-      {children}
-    </Shell>
+    <ToastProvider>
+      <CartProvider>
+        <Shell topbarRight={<StorefrontTopbarRight />}>{children}</Shell>
+        <CartDrawer />
+      </CartProvider>
+    </ToastProvider>
   );
 }

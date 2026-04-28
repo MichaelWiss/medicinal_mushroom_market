@@ -21,17 +21,23 @@ const SECONDARY: NavItem[] = [
 export function Sidebar({
   open,
   onToggle,
+  onClose,
   accountName = 'NovaBrew Labs',
   accountTier = 'Agreement tier',
 }: {
   open: boolean;
   onToggle: () => void;
+  onClose: () => void;
   accountName?: string;
   accountTier?: string;
 }) {
   const pathname = usePathname();
   const isActive = (href: string) =>
     href === '/' ? pathname === '/' : pathname.startsWith(href);
+  // Demo behaviour: clicking a nav link auto-closes the sidebar.
+  const handleNavClick = () => {
+    if (open) onClose();
+  };
 
   return (
     <aside
@@ -71,6 +77,7 @@ export function Sidebar({
               <Link
                 key={item.href}
                 href={item.href}
+                onClick={handleNavClick}
                 className={`block whitespace-nowrap px-9 py-3 text-[22px] font-normal uppercase tracking-wider3 transition-colors ${
                   isActive(item.href)
                     ? 'text-white/95'
@@ -86,6 +93,7 @@ export function Sidebar({
                 <Link
                   key={item.href}
                   href={item.href}
+                  onClick={handleNavClick}
                   className="block whitespace-nowrap px-9 py-2.5 text-[13px] font-light tracking-wide text-white/35 transition-colors hover:text-white/70"
                 >
                   {item.label}
@@ -94,6 +102,7 @@ export function Sidebar({
                 <Link
                   key={item.href}
                   href={item.href}
+                  onClick={handleNavClick}
                   className={`block whitespace-nowrap px-9 py-3 text-[22px] font-normal uppercase tracking-wider3 transition-colors ${
                     isActive(item.href)
                       ? 'text-white/95'
