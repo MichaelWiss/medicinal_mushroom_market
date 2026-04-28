@@ -7,10 +7,17 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "build": "tsc",
-    "clean": "rm -rf dist"
+    "build": "tsc -p tsconfig.build.json",
+    "clean": "rm -rf dist",
+    "seed": "cd ../.. && supabase db reset",
+    "gen-types": "cd ../.. && supabase gen types typescript --local | sed -e '/^Connecting to db/d' -e '/^A new version of Supabase CLI/,$d' > packages/db/src/types.ts",
+    "test": "vitest run"
   },
   "devDependencies": {
-    "typescript": "*"
+    "@supabase/supabase-js": "^2.105.0",
+    "@types/node": "^25.6.0",
+    "tslib": "^2.8.1",
+    "typescript": "*",
+    "vitest": "^4.1.5"
   }
 }

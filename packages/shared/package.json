@@ -7,10 +7,16 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "build": "tsc",
-    "clean": "rm -rf dist"
+    "build": "tsc -p tsconfig.build.json",
+    "clean": "rm -rf dist",
+    "test": "vitest run"
   },
   "devDependencies": {
-    "typescript": "*"
+    "@repo/db": "workspace:*",
+    "typescript": "*",
+    "vitest": "^4.1.5"
+  },
+  "dependencies": {
+    "zod": "^4.3.6"
   }
 }

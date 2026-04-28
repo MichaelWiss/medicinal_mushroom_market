@@ -19,7 +19,7 @@
 │                          APPS LAYER                                      │
 │                                                                          │
 │  ┌──────────────────────────────────────────────────────────────────┐   │
-│  │                    apps/web  (Next.js 14)                          │   │
+│  │                    apps/web  (Next.js 15)                          │   │
 │  │                Vercel Hobby — single application                   │   │
 │  │                                                                    │   │
 │  │   Route group              Purpose                                 │   │
@@ -279,7 +279,7 @@ medicinal_mushroom_market/
 ├── .env.example                Required env vars template
 │
 ├── apps/
-│   └── web/                    Next.js 14 storefront + dashboard + admin
+│   └── web/                    Next.js 15 storefront + dashboard + admin
 │       ├── app/
 │       │   ├── (storefront)/   Catalog, species detail, cart
 │       │   ├── (dashboard)/    Orders, subscriptions, batch traceability

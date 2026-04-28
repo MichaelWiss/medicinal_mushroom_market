@@ -1,0 +1,15 @@
+// Auth gate is wired in Cell 2.3 (middleware + Supabase server client).
+export default function DashboardLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="mx-auto max-w-6xl px-6 py-8">
+      <header className="mb-6 border-b border-neutral-200 pb-4 dark:border-neutral-800">
+        <p className="text-xs uppercase tracking-wide text-neutral-500">Dashboard</p>
+      </header>
+      <main>{children}</main>
+    </div>
+  );
+}

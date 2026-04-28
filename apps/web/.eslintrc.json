@@ -1,0 +1,24 @@
+{
+  "extends": "next/core-web-vitals",
+  "overrides": [
+    {
+      "files": [
+        "app/(storefront)/**/*.{ts,tsx}",
+        "app/(dashboard)/**/*.{ts,tsx}"
+      ],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": ["**/lib/supabase/admin", "@/lib/supabase/admin"],
+                "message": "Service-role client may only be imported from app/(admin)/** or app/api/admin/**. Use createClient() from lib/supabase/server.ts (RLS-bound) instead."
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

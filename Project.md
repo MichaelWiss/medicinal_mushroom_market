@@ -117,7 +117,7 @@ batches, log contamination checks, upload CoAs, manage the dispatch queue.
 |---|---|---|---|
 | **Language** | TypeScript only | Python | One language across web, edge functions, shared logic |
 | **Monorepo** | pnpm workspaces + Turborepo | Nx, Lerna | Fast installs, simple config, free Turborepo task caching |
-| **Frontend** | Next.js 14 (App Router) on Vercel Hobby | Remix, SvelteKit | Free hosting, ISR for catalog, Server Actions for mutations |
+| **Frontend** | Next.js 15 (App Router) on Vercel Hobby | Remix, SvelteKit | Free hosting, ISR for catalog, Server Actions for mutations |
 | **Commerce** | Custom Next.js + Stripe Checkout | Medusa.js | Medusa adds a Railway service for <50 SKUs and no buyer-facing storefront need it offers. Defer to Phase 5 if commerce features outgrow custom. |
 | **Database / Auth / Realtime / Storage / Cron** | Supabase Free | Neon + Clerk + separate cron | One platform, generous free tier, RLS native |
 | **ERP / Inventory** | Supabase tables (defer ERPNext) | ERPNext on Railway | ERPNext v15 needs ~2GB RAM; Railway free is 512MB. Add only if production ops outgrow Supabase. |
