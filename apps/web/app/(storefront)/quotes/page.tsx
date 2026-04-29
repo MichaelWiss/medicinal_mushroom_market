@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { PageHeader } from '@/components/shell/PageHeader';
 
 // Mirrors /demo/myellium.html (lines 705-722). Real bulk-quote workflow ships
@@ -42,12 +43,12 @@ export default function QuotesPage() {
         ))}
 
         <div style={{ paddingTop: 28 }}>
-          <a
+          <Link
             href="/"
             className="inline-block bg-yellow px-5 py-2.5 font-sans text-[10px] uppercase tracking-wider3 text-navy transition-colors hover:bg-yellow2"
           >
             Browse catalogue →
-          </a>
+          </Link>
         </div>
       </div>
     </>

@@ -364,7 +364,7 @@ endpoint creates `company_users` row pre-linked.
 **Verify:** Receive magic link → click → redirected to `(dashboard)/orders`
 with valid session and `company_id` claim in JWT.
 
-**Status:** `[ ]`
+**Status:** `[x]` (middleware refreshes session + protects `/orders`, `/traceability`, `/console` with `?next=` redirect to `/sign-in`; PKCE magic-link flow via `signInWithOtp` → `/auth/callback` `exchangeCodeForSession`; `/api/invites` admin-only endpoint creates auth user via service-role + pre-links `company_users` row so first sign-in already carries `company_id` claim; `pnpm typecheck` + `pnpm build` green)
 
 ---
 
@@ -383,7 +383,7 @@ label.
 without refresh. View source of static HTML — no JWT or service-role data
 present.
 
-**Status:** `[ ]`
+**Status:** `[x]` (migration `20260428000001_catalogue_public.sql` opens species + passing batches to `anon` and adds `batches` to the `supabase_realtime` publication; `loadCatalogue()` aggregates passing-batch units server-side via a non-cookie anon client so `/` stays statically rendered with `revalidate=300` — build report confirms `/` is `○` static with `Revalidate: 5m`; `CatalogueList` subscribes to `postgres_changes` on `public.batches` and re-aggregates per-species totals on any change; presentation map covers all 12 seeded species)
 
 ---
 
@@ -400,7 +400,15 @@ prices for the buyer's tier, freshest passing batch indicator.
 **Verify:** Sign in as `agreement`-tier user → sees 10% lower price than
 list. Sign in as `oem`-tier → sees 22% lower.
 
-**Status:** `[ ]`
+**Status:** `[x]` — `app/(storefront)/species/[id]/page.tsx` (server, dynamic) +
+`AddToCartButton` client island; `lib/data/species-detail.ts` joins species
+with passing batches (freshest by harvest_date desc / inoculation_date desc),
+resolves buyer tier via `company_users → companies.tier` (defaults `spot` when
+unauthenticated), and computes per-format tier price with
+`calculateLinePrice(price*100, 1, tier)/100`. Catalogue rows now link to
+`/species/${id}` via Next `Link` (typed-routes cast). `pnpm typecheck` clean;
+`pnpm --filter web build` shows `/species/[id]` as `ƒ` 1.85 kB and `/` still
+`○` Revalidate 5m.
 
 ---
 

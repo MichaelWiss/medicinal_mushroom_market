@@ -1,20 +1,10 @@
-import { Shell } from '@/components/shell/Shell';
-import { ToastProvider } from '@/components/ui/ToastProvider';
-import { CartProvider } from '@/components/cart/CartProvider';
-import { CartDrawer } from '@/components/cart/CartDrawer';
-import { StorefrontTopbarRight } from '@/components/cart/StorefrontTopbarRight';
-
+// Providers + Shell live in the root layout so navigation between route
+// groups keeps a single mounted shell (no provider remount = no flash, no
+// cart loss). This file only declares the route group.
 export default function StorefrontLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  return (
-    <ToastProvider>
-      <CartProvider>
-        <Shell topbarRight={<StorefrontTopbarRight />}>{children}</Shell>
-        <CartDrawer />
-      </CartProvider>
-    </ToastProvider>
-  );
+  return <>{children}</>;
 }

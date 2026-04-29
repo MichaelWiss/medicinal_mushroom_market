@@ -4,6 +4,10 @@ import { useState, type ReactNode } from 'react';
 import { usePathname } from 'next/navigation';
 import { Sidebar } from './Sidebar';
 import { Topbar } from './Topbar';
+import { StorefrontTopbarRight } from '@/components/cart/StorefrontTopbarRight';
+
+// Routes that should show the storefront topbar (cart, quote CTA).
+const STOREFRONT_PATHS = new Set(['/', '/subscriptions', '/quotes']);
 
 // Mirrors /demo/myellium.html `TITLES` map (line 999). Keeps the sticky
 // topbar caption in sync with the active route so behaviour matches the demo
@@ -39,6 +43,9 @@ export function Shell({
   const [open, setOpen] = useState(false);
   const pathname = usePathname() ?? '/';
   const title = topbarTitle ?? titleForPath(pathname);
+  const right =
+    topbarRight ??
+    (STOREFRONT_PATHS.has(pathname) ? <StorefrontTopbarRight /> : null);
 
   return (
     <div
@@ -54,7 +61,7 @@ export function Shell({
         onClose={() => setOpen(false)}
       />
       <div className="flex min-w-0 flex-col">
-        <Topbar title={title} right={topbarRight} />
+        <Topbar title={title} right={right} />
         <div className="flex-1 overflow-y-auto">{children}</div>
       </div>
     </div>

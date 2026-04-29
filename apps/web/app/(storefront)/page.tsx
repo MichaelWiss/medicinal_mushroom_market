@@ -1,9 +1,16 @@
 import { PageHeader } from '@/components/shell/PageHeader';
 import { CatalogueList } from '@/components/catalogue/CatalogueList';
-import { SPECIES } from '@/lib/data/species';
+import { loadCatalogue } from '@/lib/data/catalogue';
 
-export default function StorefrontHome() {
-  const inStock = SPECIES.filter((s) => s.units > 0).length;
+// Storefront landing — Cell 2.4: Supabase-backed catalogue with ISR.
+// `revalidate` controls the static-cache TTL; client-side Realtime
+// subscriptions keep `available_units` fresh between regenerations.
+export const revalidate = 300;
+
+export default async function StorefrontHome() {
+  const species = await loadCatalogue();
+  const inStock = species.filter((s) => s.units > 0).length;
+
   return (
     <>
       <PageHeader
@@ -13,7 +20,7 @@ export default function StorefrontHome() {
         description="Inoculation-dated, contamination-checked, cold-chain certified. Monday dispatch for all fresh formats."
         stat={{ value: inStock, label: 'Species available' }}
       />
-      <CatalogueList />
+      <CatalogueList initialSpecies={species} />
     </>
   );
 }

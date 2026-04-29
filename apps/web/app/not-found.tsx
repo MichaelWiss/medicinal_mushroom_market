@@ -1,3 +1,5 @@
+import Link from 'next/link';
+
 export default function NotFound() {
   return (
     <main className="flex min-h-screen items-center justify-center bg-putty p-12 text-ink">
@@ -12,12 +14,12 @@ export default function NotFound() {
           The page you’re looking for hasn’t been planted yet. Head back to the
           catalogue to keep browsing.
         </p>
-        <a
+        <Link
           href="/"
           className="mt-6 inline-block border border-ink/30 px-5 py-2 text-[11px] uppercase tracking-[0.3em] text-ink hover:bg-ink hover:text-putty"
         >
           Back to catalogue
-        </a>
+        </Link>
       </div>
     </main>
   );
