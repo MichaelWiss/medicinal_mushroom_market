@@ -425,19 +425,48 @@ fresh signed URL on each request.
 **Verify:** With test order in seed, page shows all batch fields. Click CoA
 link → PDF downloads. As different-company user → 403.
 
-**Status:** `[ ]`
+**Status:** `[x]` — `/traceability` is now a server-rendered order index
+(`app/(dashboard)/traceability/page.tsx`, `force-dynamic`) backed by
+`loadOrderIndex()` in `apps/web/lib/data/traceability.ts`; rows link to
+`/traceability/[orderId]` (new dynamic route) which renders the demo
+`.trace-card` markup verbatim. `loadTraceability(orderId)` joins
+`orders → order_items → species + batches` via the cookie-auth server
+client (RLS hides foreign companies → `notFound()`), computes per-batch
+freshness via `@repo/shared/freshness`, and mints fresh 60 s signed CoA
+URLs from the `coa` Storage bucket. Missing-object responses degrade to a
+"CoA pending" cell instead of throwing. New idempotent
+`apps/web/scripts/seed-coa.ts` (run via `pnpm --filter web traceability:seed-coa`)
+uploads minimal valid PDF placeholders for the three seeded batches
+(`ba000001`, `ba000028`, `ba000029`); two consecutive runs both report
+`✓ uploaded ... (658 bytes)` with no errors. Cross-company access is
+enforced by RLS on `orders` (foreign orderId → `notFound()`); the storage
+policy gates URL **generation**, so a foreign session cannot mint a CoA
+link for a batch it does not own. Note: signed URLs themselves are
+bearer tokens valid until expiry, hence the short 60 s TTL.
 
 ---
 
 ### Cell 2.7 — Verify Phase 2
 **Verify checklist:**
-- [ ] Magic link sign-in works end-to-end
-- [ ] Catalog shows live freshness and stock
-- [ ] Tier pricing visible to authenticated buyers
-- [ ] Batch traceability page enforces company isolation
-- [ ] No service-role import in any client component (lint passes)
+- [x] Magic link sign-in works end-to-end (Cell 2.3 — middleware-protected
+  `(dashboard)/(admin)`, PKCE callback, invite endpoint)
+- [x] Catalog shows live freshness and stock (Cell 2.4 — ISR `revalidate=300`
+  + Realtime subscription on `public.batches`)
+- [x] Tier pricing visible to authenticated buyers (Cell 2.5 — server-side
+  `loadSpeciesDetail` resolves tier via `company_users → companies.tier`,
+  applies `calculateLinePrice` per format)
+- [x] Batch traceability page enforces company isolation (Cell 2.6 — RLS on
+  `orders` filters `loadTraceability`; cross-company orderId returns
+  `notFound()`; storage RLS gates CoA URL generation)
+- [x] No service-role import in any client component (lint passes — ESLint
+  `no-restricted-imports` from Cell 2.2 still in force; `pnpm --filter
+  web lint` clean)
 
-**Status:** `[ ]`
+**Status:** `[x]` — Phase 2 complete. Catalog → species detail →
+traceability all wired to live Supabase data with RLS-backed isolation;
+`pnpm --filter web typecheck`/`lint`/`build` all green; `/traceability`
+and `/traceability/[orderId]` build as `ƒ` dynamic, all other Phase 2
+routes unchanged.
 
 ---
 
@@ -851,8 +880,8 @@ Monday, `last_cron_run` is stale → alert (manual for v1).
 | 2.3 | Magic-Link Auth + Invite Flow | Catalog | `[ ]` |
 | 2.4 | Catalog Page (ISR + Realtime) | Catalog | `[ ]` |
 | 2.5 | Species Detail Page | Catalog | `[ ]` |
-| 2.6 | Batch Traceability View | Catalog | `[ ]` |
-| 2.7 | Verify Phase 2 | Catalog | `[ ]` |
+| 2.6 | Batch Traceability View | Catalog | `[x]` |
+| 2.7 | Verify Phase 2 | Catalog | `[x]` |
 | 3.1 | Cart State | Checkout | `[ ]` |
 | 3.2 | Cart Page | Checkout | `[ ]` |
 | 3.3 | Checkout Server Action | Checkout | `[ ]` |

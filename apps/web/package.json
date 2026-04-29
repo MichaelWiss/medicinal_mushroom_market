@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "traceability:seed-coa": "pnpm dlx tsx --env-file=.env.local scripts/seed-coa.ts"
   },
   "dependencies": {
     "@repo/db": "workspace:*",

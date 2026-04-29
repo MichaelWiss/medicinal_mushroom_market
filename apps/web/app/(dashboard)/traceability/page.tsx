@@ -1,88 +1,92 @@
+// Traceability order index (Cell 2.6).
+//
+// Lists the signed-in company's orders. RLS scopes the rows automatically;
+// each row links to `/traceability/[orderId]` for the batch detail view.
+
+import Link from 'next/link';
+import type { Route } from 'next';
+import { redirect } from 'next/navigation';
 import { PageHeader } from '@/components/shell/PageHeader';
+import { loadOrderIndex } from '@/lib/data/traceability';
 
-// Mirrors /demo/myellium.html `renderTrace()` (lines 950-975). Real batch
-// records arrive from Supabase in Cell 2.5.
-const BATCHES = [
-  {
-    name: "Lion's Mane",
-    batch: 'BCH-2026-044',
-    inoc: '22 Mar 2026',
-    harvest: '13 Apr 2026',
-    substrate: 'Hardwood sawdust S-0882',
-    zone: 'Cold-02',
-    yield: '3.2 kg',
-    shelf: '4 days',
-  },
-  {
-    name: 'Reishi',
-    batch: 'BCH-2026-039',
-    inoc: '10 Feb 2026',
-    harvest: '29 Mar 2026',
-    substrate: 'Oak log lot S-0741',
-    zone: 'Dry-07',
-    yield: '1.8 kg',
-    shelf: '11 months',
-  },
-];
+export const dynamic = 'force-dynamic';
 
-export default function TraceabilityPage() {
+const fmtGBP = (pence: number) =>
+  `£${(pence / 100).toLocaleString('en-GB', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+
+const STATUS_PILL: Record<string, string> = {
+  pending: 's-con',
+  confirmed: 's-con',
+  picking: 's-con',
+  dispatched: 's-dis',
+  delivered: 's-dis',
+  cancelled: 's-con',
+};
+
+export default async function TraceabilityIndexPage() {
+  const orders = await loadOrderIndex();
+  if (orders === null) redirect('/sign-in?next=/traceability');
+
   return (
     <>
       <PageHeader
-        label="Order MYC-2026-024"
+        label="Account"
         title="Batch"
         italicSuffix="traceability"
-        description="Full inoculation, harvest, and contamination records. Certificates of Analysis on file."
-        stat={{ value: BATCHES.length, label: 'Batch records' }}
+        description="Pick an order to view inoculation, harvest, and contamination records for every allocated batch."
+        stat={{ value: orders.length, label: 'Orders on file' }}
       />
 
-      <div className="trace-wrap">
-        {BATCHES.map((b) => (
-          <div className="trace-card" key={b.batch}>
-            <div className="trace-hd">
-              <div className="trace-thumb" />
-              <div>
-                <div className="trace-species">{b.name}</div>
-                <div className="trace-batchid">{b.batch}</div>
-              </div>
-              <span className="s-pill s-dis">Pass</span>
-            </div>
-            <div className="trace-grid">
-              <div className="tc">
-                <label>Inoculation date</label>
-                <span>{b.inoc}</span>
-              </div>
-              <div className="tc">
-                <label>Harvest date</label>
-                <span>{b.harvest}</span>
-              </div>
-              <div className="tc">
-                <label>Substrate lot</label>
-                <span>{b.substrate}</span>
-              </div>
-              <div className="tc">
-                <label>Contamination check</label>
-                <span className="tc-pass">Pass</span>
-              </div>
-              <div className="tc">
-                <label>Storage zone</label>
-                <span>{b.zone}</span>
-              </div>
-              <div className="tc">
-                <label>Batch yield</label>
-                <span>{b.yield}</span>
-              </div>
-              <div className="tc">
-                <label>Shelf life remaining</label>
-                <span>{b.shelf}</span>
-              </div>
-              <div className="tc">
-                <label>Certificate of Analysis</label>
-                <span className="tc-coa">Download CoA →</span>
-              </div>
-            </div>
-          </div>
-        ))}
+      <div className="tbl-wrap">
+        {orders.length === 0 ? (
+          <p className="text-[13px] leading-[1.6] text-ink2">
+            No orders yet. Once your first order is confirmed, batch
+            traceability records appear here.
+          </p>
+        ) : (
+          <table className="data-tbl">
+            <thead>
+              <tr>
+                <th>Reference</th>
+                <th>Dispatch</th>
+                <th>Items</th>
+                <th>Total</th>
+                <th>Status</th>
+                <th>Trace</th>
+              </tr>
+            </thead>
+            <tbody>
+              {orders.map((o) => (
+                <tr key={o.id}>
+                  <td className="mono">{o.shortRef}</td>
+                  <td>{o.dispatchDate ?? '—'}</td>
+                  <td>{o.itemCount}</td>
+                  <td style={{ fontWeight: 400, color: 'var(--ink)' }}>
+                    {fmtGBP(o.totalPrice)}
+                  </td>
+                  <td>
+                    <span
+                      className={`s-pill ${STATUS_PILL[o.status] ?? 's-con'}`}
+                    >
+                      {o.status.charAt(0).toUpperCase() + o.status.slice(1)}
+                    </span>
+                  </td>
+                  <td>
+                    <Link
+                      href={`/traceability/${o.id}` as Route}
+                      className="tlink"
+                    >
+                      View →
+                    </Link>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
     </>
   );
