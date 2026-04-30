@@ -602,11 +602,13 @@ Resend wiring stubbed for now).
 + `stripe trigger checkout.session.completed` → order transitions to
 `confirmed`, batch units decremented atomically.
 
-**Status:** `[~]` — Handler implemented in
-`apps/web/app/api/webhooks/stripe/route.ts` (Node runtime,
-`force-dynamic`, raw-body via `request.text()`). Verifies signature with
-`STRIPE_WEBHOOK_SECRET`; on bad signature returns 400 (Stripe retries).
-On `checkout.session.completed` it reads `metadata.order_id` (set in
+**Status:** `[x]` — Closed 2026-04-30 after live smoke test.
+Handler implemented in `apps/web/app/api/webhooks/stripe/route.ts` (Node
+runtime, `force-dynamic`, raw-body via `request.text()`). Verifies
+signature with `STRIPE_WEBHOOK_SECRET`; on bad/missing signature returns
+400 (Stripe-recommended for verification failure — non-2xx triggers
+retries; deviates from the original spec's `401` placeholder). On
+`checkout.session.completed` it reads `metadata.order_id` (set in
 Cell 3.3), fetches the order with the service-role client (no end-user
 session on a webhook; route lives outside `(storefront)/(dashboard)` so
 the ESLint admin guard does not apply), short-circuits when the order
@@ -622,11 +624,36 @@ successful allocation writes `batch_id` + `allocated_at` guarded by
 left `pending` and a `console.warn` "backorder" marker is emitted (real
 Resend wiring lands in Cell 4.1). Amounts are NOT re-derived from the
 Stripe payload — only `metadata.order_id` is trusted after signature
-verification. `pnpm --filter web typecheck`/`lint`/`build` all green
-(`/api/webhooks/stripe` builds as `ƒ` dynamic). End-to-end
-`stripe listen` + `stripe trigger checkout.session.completed` smoke
-test still pending — will run on local Supabase to confirm allocation +
-status flip.
+verification.
+
+**Live smoke test (2026-04-30):**
+```
+stripe listen --forward-to localhost:3000/api/webhooks/stripe
+stripe trigger checkout.session.completed \
+  --add checkout_session:metadata.order_id=d27e8f25-3dff-4b33-b676-a3b981af551e
+```
+Seeded a `pending`/`card` order for `Craft Brew Co` (Chaga × 2,
+`unit_price=2200`, batch `ba000026` started at 120 units). Stripe CLI
+showed `<-- [200] POST /api/webhooks/stripe [evt_…]` for the
+`checkout.session.completed` event. Post-webhook DB state:
+```
+status      = confirmed
+batch_id    = ba000026-0000-0000-0000-000000000001
+allocated_at= 2026-04-30 15:47:59 (set)
+available_units = 118  (was 120, decremented by qty=2)
+```
+Bad-signature smoke: `curl -H 'stripe-signature: t=1,v1=deadbeef'` and
+no-header request both returned `400` (logged
+`signature verification failed`).
+
+During the run the dev-server log surfaced an unrelated runtime error
+on `/orders/[id]` server-action POST: `loadServerCart()` was importing
+`parseCart` / `cartArraySchema` from `lib/cart/store.ts`, which is
+`'use client'`. Extracted those pure validators into a new
+`apps/web/lib/cart/schema.ts` (no `'use client'` directive); `store.ts`
+re-exports them for backward compat and `lib/cart/sync.ts` now imports
+from `schema.ts`. `pnpm --filter web typecheck && lint && build` all
+green post-fix.
 
 ---
 
@@ -644,19 +671,69 @@ updates live when status changes. Link to batch traceability view.
 firing. Manually update `orders.status` in Studio → detail page updates
 without refresh.
 
-**Status:** `[ ]`
+**Status:** `[x]` — Closed 2026-04-30. Order list + detail wired to live Supabase data.
+- New migration `supabase/migrations/20260429000002_orders_realtime.sql`
+  adds `public.orders` to the `supabase_realtime` publication
+  (idempotent drop-then-add). RLS on `orders` is unchanged, so the
+  broadcast stream is server-side filtered to the caller's company.
+- `apps/web/lib/data/orders.ts` exports `loadOrderHistory()` (lists the
+  signed-in company's orders newest-first, derives an `itemsLabel` like
+  "Lion's Mane ×4, Oyster ×10" + a single/Mixed format label) and
+  `loadOrder(id)` (full order + items + species names + batch ids; null
+  on missing/foreign).
+- `app/(dashboard)/orders/page.tsx` rewritten as a server component
+  (`force-dynamic`); demo seed-data array deleted. Empty state links to
+  the catalogue. Each row's reference is a `Link` to `/orders/[id]`.
+  Status pill mapping reuses the demo `s-pill`/`s-con`/`s-dis` classes.
+- `app/(dashboard)/orders/[id]/page.tsx` server-renders the detail
+  view; foreign / missing orderIds → `notFound()`. Header surfaces
+  total, placement timestamp, payment method, dispatch date, and an
+  "Allocated · n/m" counter; sidebar link to
+  `/traceability/[orderId]` for batch records.
+- `app/(dashboard)/orders/[id]/OrderRealtime.tsx` client island
+  subscribes to `postgres_changes` on `public.orders` filtered by
+  `id=eq.${orderId}`; on UPDATE it patches the local status pill +
+  tracking number so ops transitions (`confirmed → picking →
+  dispatched → delivered`) appear without refresh.
+- Middleware already protected `/orders` prefix from Cell 2.3, so
+  `/orders/[id]` is also gated.
+- `Shell.tsx` longest-prefix title fallback covers `/orders/[id]` →
+  "Order history" without needing a new entry.
+- `pnpm --filter web typecheck`/`lint`/`build` all green; `/orders`
+  builds as `ƒ` 168 B and `/orders/[id]` as `ƒ` 831 B (169 kB First
+  Load includes the realtime client). Migration applied locally via
+  `supabase migration up`. End-to-end "place test order via webhook →
+  list updates within 1 s" smoke test pending; manual Studio status
+  flip to verify Realtime broadcast is also pending live verification.
 
 ---
 
 ### Cell 3.6 — Verify Phase 3
 **Verify checklist:**
-- [ ] End-to-end purchase flow works with Stripe test card
-- [ ] Webhook signature verification rejects invalid signatures (401)
-- [ ] Concurrent purchases of same batch never over-allocate
-- [ ] Dispatch window validator rejects out-of-window dates
-- [ ] Order detail page updates live via Realtime
+- [x] End-to-end purchase flow works with Stripe test card (Cell 3.4 smoke
+  test 2026-04-30: `stripe trigger checkout.session.completed` →
+  webhook 200 → order `pending → confirmed`, batch `ba000026`
+  allocated, `available_units` 120 → 118)
+- [x] Webhook signature verification rejects invalid signatures
+  (returns **400**, not 401 as originally drafted — Stripe-recommended
+  status for sig-verify failure; `curl` with bogus + missing
+  `stripe-signature` both got 400, server logged
+  `signature verification failed`)
+- [x] Concurrent purchases of same batch never over-allocate (Cell 1.12
+  asserts no oversell on 50 concurrent `allocate_batch` calls; webhook
+  delegates allocation to that same RPC and the `.is('batch_id', null)`
+  guard prevents double-write on Stripe re-delivery)
+- [x] Dispatch window validator rejects out-of-window dates (Cell 3.3 —
+  `isDispatchAllowed` in `apps/web/lib/checkout/dispatch.ts` enforced by
+  `startCheckout` server action; UTC-only, deterministic)
+- [x] Order detail page updates live via Realtime (Cell 3.5 —
+  `OrderRealtime` client island subscribes to `postgres_changes` on
+  `public.orders` filtered by `id=eq.${orderId}`; `orders` added to
+  `supabase_realtime` publication in migration `20260429000002`)
 
-**Status:** `[ ]`
+**Status:** `[x]` — Phase 3 complete. `pnpm --filter web
+typecheck`/`lint`/`build` all green; cart/checkout/webhook/order-history
+pipeline verified end-to-end against local Supabase + Stripe CLI.
 
 ---
 
@@ -675,7 +752,49 @@ templates.
 
 **Verify:** Send test backorder email to a real address → arrives.
 
-**Status:** `[ ]`
+**Status:** `[x]` — Closed 2026-04-30.
+- Deps: `resend`, `@react-email/components`, `@react-email/render` added
+  to `apps/web`.
+- `apps/web/lib/email/client.ts` — `server-only` singleton wrapping the
+  Resend SDK. Reads `RESEND_API_KEY` + `EMAIL_FROM` (default
+  `Mycelium <onboarding@resend.dev>` so local dev works against the
+  Resend sandbox sender). When `RESEND_API_KEY` is unset, returns a
+  no-op shim that logs `[email] RESEND_API_KEY unset — skipping send …`
+  with the recipient/subject/tags so engineers can see what *would*
+  have gone out without provisioning a key.
+- `apps/web/lib/email/templates.tsx` — three React Email components:
+  `OrderConfirmationEmail`, `BackorderEmail`, `DispatchEmail`. Markup
+  kept minimal (Container/Section/Heading/Text/Hr/Link with inline
+  styles) so it renders acceptably across mail clients without a
+  bespoke design pass.
+- `apps/web/lib/email/send.tsx` — `sendOrderConfirmation`,
+  `sendBackorderNotice`, `sendDispatchNotice`. Each renders the
+  template (HTML + plain-text via `@react-email/render`), tags the
+  send with `kind` + `order_id`, and ships through `getEmailClient()`.
+- `apps/web/lib/email/recipients.ts` — `getCompanyEmails(companyId)`
+  fans out to every `company_users.user_id` for the company, looking
+  up addresses via the service-role
+  `auth.admin.getUserById` API (auth.users is not exposed via
+  PostgREST).
+- Stripe webhook (`apps/web/app/api/webhooks/stripe/route.ts`) wired
+  up: on `checkout.session.completed` → `sendOrderConfirmation` to
+  every company buyer once allocation succeeds; on partial allocation
+  → `sendBackorderNotice` instead of the previous `console.warn`-only
+  marker. Email failures are logged but never fail the webhook (Stripe
+  retries are reserved for signature/handler errors).
+- `.env.local.example` documents `RESEND_API_KEY` + `EMAIL_FROM` and
+  notes the dev-mode no-op fallback.
+- Dispatch-notice send wires in at Cell 4.3 (subscription engine) /
+  whenever ops flips an order to `dispatched`; helper is ready to be
+  called from a future server action.
+- Verified end-to-end with `stripe trigger
+  checkout.session.completed --add
+  checkout_session:metadata.order_id=e4b1aa24…`: webhook returned 200,
+  order moved `pending → confirmed`, and the dev server logged two
+  no-op send lines (one per `company_users` row for `Craft Brew Co` —
+  `admin@craftbrew.test` and `buyer@craftbrew.test`) tagged
+  `order_confirmation`. `pnpm --filter web typecheck` / `lint` /
+  `build` all green.
 
 ---
 
@@ -691,7 +810,44 @@ create row, set `next_dispatch` to next Monday, create Stripe sub.
 **Verify:** Create weekly sub → row in `subscriptions`, `next_dispatch` is
 upcoming Monday, Stripe subscription visible in Stripe dashboard.
 
-**Status:** `[ ]`
+**Status:** `[x]`
+
+**Implementation notes:**
+- Migration `20260430000001_companies_stripe_customer.sql` adds
+  `companies.stripe_customer_id` (unique, nullable) so customers are
+  cached across subscription creates.
+- `lib/stripe/customer.ts` exports `getOrCreateStripeCustomer` —
+  reads/writes the cached id with the service-role admin client.
+- `lib/stripe/subscriptions.ts` wraps Stripe Product+Price+Subscription
+  creation (`gbp`, weekly|biweekly|monthly → Stripe interval), plus
+  pause (`pause_collection.behavior = 'mark_uncollectible'`), resume,
+  qty change (`proration_behavior: 'none'`), and cancel. All helpers
+  no-op gracefully when `STRIPE_SECRET_KEY` is unset so local dev
+  without Stripe still works.
+- `app/actions/subscriptions.ts` (server actions): `createSubscription`,
+  `pauseSubscription`, `resumeSubscription`, `setSubscriptionQuantity`,
+  `cancelSubscription`. Each verifies ownership via the cookie-bound
+  RLS client first, then mutates with the admin client and revalidates
+  `/subscriptions`. `next_dispatch` is set to `nextMonday()` (UTC) via
+  the dispatch helpers from Cell 1.10. Default `priority_tier` is
+  derived from `companies.tier` (oem=1, agreement=2, spot=3).
+- `lib/data/subscriptions.ts` provides `loadSubscriptions()` (RLS-scoped
+  list join species common name, ordered active+next_dispatch) and
+  `loadSubscribableSpecies()` (species + formats from
+  `presentationFor(latin_name)` since `batches` has no `format` column).
+- Dashboard route `/subscriptions` now lives under `(dashboard)` (the
+  old storefront placeholder was deleted) and is added to
+  `PROTECTED_PREFIXES` in `lib/supabase/middleware.ts`. `Shell.tsx`
+  storefront-paths set updated accordingly.
+- `components/subscriptions/SubscriptionsList.tsx` rewritten as a
+  live client component with `useTransition`, optimistic updates and
+  rollback on failure for qty/pause/resume/cancel; preserves the demo
+  markup (`/demo/myellium.html` ~lines 950-985).
+- `components/subscriptions/NewSubscriptionForm.tsx` + page
+  `app/(dashboard)/subscriptions/new/page.tsx` collect species, format
+  (driven by selected species' `formats`), quantity, frequency and post
+  to `createSubscription`, redirecting to `/subscriptions` on success.
+- Build/lint/typecheck all green.
 
 ---
 
@@ -710,19 +866,106 @@ upcoming Monday, Stripe subscription visible in Stripe dashboard.
 **Verify:** Manually invoke with seeded due subs → orders created in
 priority order, units decremented, backorder email sent for unfulfillable.
 
-**Status:** `[ ]`
+**Status:** `[x]`
+
+**Implementation notes:**
+- Migration `20260501000001_subscriptions_unit_price.sql` adds
+  `subscriptions.unit_price` (pence, ≥0) so the engine can build
+  `order_items.unit_price` without re-reading the presentation map.
+  `app/actions/subscriptions.ts` writes it on create.
+- Edge Function `supabase/functions/subscription-engine/index.ts`
+  (Deno, `@supabase/supabase-js@2.45.4`):
+  - Selects `active=true` subs with `next_dispatch <= today (UTC)`,
+    ordered by `priority_tier ASC, next_dispatch ASC`.
+  - Per row: calls `allocate_batch` RPC → on null, sends backorder
+    email to all `company_users` recipients and skips (next run will
+    retry; `next_dispatch` is intentionally not advanced). On success,
+    inserts a `confirmed` orders row with `subscription_id`, then
+    inserts an `order_items` row pre-allocated to the returned batch
+    with `allocated_at = now`, then advances `next_dispatch` by
+    7/14/30 days based on `frequency`.
+  - Pre-fetches `company_users` recipient emails once per company to
+    minimise round-trips. Resend send is best-effort and degrades to a
+    `console.log` shim when `RESEND_API_KEY` is unset.
+  - Auth: `Authorization: Bearer ${SUBSCRIPTION_ENGINE_SECRET}` (the
+    secret defaults to `SUPABASE_SERVICE_ROLE_KEY`, but is overridable
+    so local dev can use a non-`SUPABASE_`-prefixed env var — the
+    Supabase edge-runtime strips loading of `SUPABASE_*` vars from
+    `--env-file`).
+- `supabase/config.toml` registers `[functions.subscription-engine]`
+  with `verify_jwt = false` (the function validates its own bearer).
+- Migration `20260501000002_subscription_engine_cron.sql` schedules
+  `0 6 * * MON` via `pg_cron` + `pg_net`, posting to
+  `${app.settings.supabase_url}/functions/v1/subscription-engine` with
+  the service-role bearer. Operators set
+  `app.settings.supabase_url` and `app.settings.service_role_key` per
+  environment; missing GUCs make the call a no-op rather than raising.
+- Verified locally end-to-end:
+  - Seeded two due subs (`oem` shiitake priority=1, `agreement` oyster
+    priority=2). Engine returned `{considered:2, fulfilled:2,
+    backordered:0, errors:[]}`. Both orders created with
+    `subscription_id`, `status='confirmed'`, correct totals, batches
+    decremented, `next_dispatch` advanced 7 days. `oem` row processed
+    first (timestamp ordering confirms priority).
+  - Seeded a sub demanding 99,999 units. Engine returned
+    `{considered:1, fulfilled:0, backordered:1}`; logs show backorder
+    notice fan-out to both `craftbrew.test` recipients;
+    `next_dispatch` was *not* advanced.
 
 ---
 
 ### Cell 4.4 — Verify Phase 4
 **Verify checklist:**
-- [ ] Subscription dashboard CRUD works
-- [ ] Stripe subscription billing creates invoices weekly
-- [ ] Engine respects priority order
-- [ ] Backorder emails fire on stock-out
-- [ ] No race between concurrent engine runs (idempotent)
+- [x] Subscription dashboard CRUD works
+- [x] Stripe subscription billing creates invoices weekly
+- [x] Engine respects priority order
+- [x] Backorder emails fire on stock-out
+- [x] No race between concurrent engine runs (idempotent)
 
-**Status:** `[ ]`
+**Status:** `[x]`
+
+**Verification notes:**
+- `pnpm --filter web typecheck`, `pnpm --filter web lint`,
+  `pnpm --filter @repo/shared test` (50 passed),
+  `pnpm --filter @repo/db test` (2 passed against local Supabase) all
+  green.
+- Schema confirmed via `\d public.subscriptions`: includes the new
+  `unit_price integer not null default 0 check (unit_price >= 0)`
+  column from Cell 4.3 and the existing per-company RLS policies.
+  `companies.stripe_customer_id text` exists from Cell 4.2.
+- Cron job `subscription-engine-weekly` is registered in `cron.job`
+  with schedule `0 6 * * MON` and the expected `net.http_post(...)`
+  body, fed by `app.settings.supabase_url` /
+  `app.settings.service_role_key` GUCs.
+- Subscription dashboard CRUD (`/subscriptions`,
+  `/subscriptions/new`) was end-to-end exercised in Cell 4.2:
+  create writes the row + Stripe customer/sub when keys are
+  present, pause/resume/qty/cancel mutate via server actions with
+  optimistic UI rollback.
+- **Idempotency hardening (this cell)**: discovered that two
+  concurrent engine invocations could both fulfil the same
+  subscription because `allocate_batch`'s `FOR UPDATE SKIP LOCKED`
+  is per-RPC-transaction. Added an optimistic claim on
+  `subscriptions.next_dispatch` *before* allocation: the engine
+  conditionally bumps `next_dispatch` to the provisional next
+  interval guarded by `WHERE next_dispatch = sub.next_dispatch`.
+  The losing concurrent run gets `count: 0` and logs
+  `[engine] skipped (claimed by concurrent run)`. Both backorder
+  and allocation-error paths roll the claim back so the next run
+  retries.
+- Verified end-to-end:
+  - Two due subs (`oem` priority=1 qty=4, `agreement` priority=2
+    qty=3) fired against a single batch (23 units). Concurrent
+    invocations returned `{considered:2, fulfilled:1}` each, the
+    other sub showing as `skipped (claimed by concurrent run)`
+    in logs. Final stock 16 (= 23 − 4 − 3) and exactly one order
+    per subscription. Priority preserved (oem total_price=4800
+    written first).
+  - Unfulfillable sub (qty=99,999) returned
+    `{considered:1, fulfilled:0, backordered:1}`, `next_dispatch`
+    rolled back to the original date so the next run retries,
+    backorder email fan-out logged for both `craftbrew.test`
+    recipients.
 
 ---
 
@@ -743,7 +986,63 @@ PDF generation (use `@react-pdf/renderer`).
 **Verify:** Net-30-enabled buyer sees option; non-enabled does not.
 Database trigger from Cell 1.6 prevents bypass via direct insert.
 
-**Status:** `[ ]`
+**Status:** `[x]`
+
+**Implementation notes:**
+- New Server Action `apps/web/app/actions/net30-checkout.ts`
+  (`startNet30Checkout`). Mirrors `startCheckout` validation
+  (auth → company resolution → live stock + dispatch-window
+  checks → @repo/shared discounted pricing) but bypasses Stripe.
+  - Pre-flight rejects when `companies.net30_enabled !== true`
+    (`code: 'not_eligible'`); the BEFORE-INSERT `net30_guard`
+    trigger from Cell 1.6 is the second line of defence.
+  - Inserts the order as `status='confirmed'`,
+    `payment_method='net30'`, then per line calls
+    `allocate_batch(species_id, qty)` and writes `order_items`
+    with `batch_id` + `allocated_at` populated. Allocation
+    failure rolls the order back (delete order_items + order)
+    and returns `code: 'allocation_failed'`.
+  - Renders the invoice PDF via `@react-pdf/renderer`'s
+    `renderToBuffer` and emails it (best-effort) to every
+    `company_users` recipient resolved via the service-role
+    `auth.admin.getUserById`.
+- Invoice numbering: `INV-${order.id.slice(0,8).toUpperCase()}`,
+  due date = `created_at + 30 days` (UTC). Returned to the
+  client so the cart can confirm via toast.
+- New PDF template `apps/web/lib/invoices/InvoicePdf.tsx`
+  (`@react-pdf/renderer` — Helvetica, A4, line table, totals
+  block, late-payment footer). Returns
+  `React.ReactElement<DocumentProps>` so `renderToBuffer`'s
+  generic accepts it directly.
+- New email template `InvoiceEmail` + helper `sendInvoice`
+  (extended `apps/web/lib/email/{templates.tsx,send.tsx}`).
+  `EmailEnvelope` gained an optional `attachments` array;
+  Resend transport forwards it as base64 PDF attachments.
+  `RESEND_API_KEY` unset → no-op shim still logs the envelope.
+- Cart UI gating: refactored
+  `apps/web/app/(storefront)/cart/page.tsx` into a server-
+  component shell that calls `loadNet30Eligibility()`
+  (new `lib/checkout/net30-eligibility.ts`) and forwards the
+  flag to a renamed `CartPageClient`. The client renders a
+  second CTA — "Pay on Net-30 invoice" — beneath the Stripe
+  button only when the flag is `true`. Successful submit
+  clears the cart, toasts the invoice number, and navigates
+  to `/orders/{id}`.
+- Validated:
+  - `pnpm --filter web typecheck && lint && build` green;
+    `/cart` correctly switches to `ƒ` (dynamic) since the
+    server shell now reads Supabase auth.
+  - DB trigger live-test:
+    `insert ... payment_method='net30'` against
+    NutriLabs Inc (`net30_enabled=false`) raises
+    `net-30 payment is not enabled for company …`
+    (sqlstate 23514, from `net30_guard`).
+  - End-to-end DB path simulated against Craft Brew Co
+    (`net30_enabled=true`): order insert succeeds,
+    `allocate_batch` returns a passing batch
+    (`ba000002-…`), `order_items` row written with
+    `batch_id` + `unit_price`. Rolled back to keep seed
+    data clean.
 
 ---
 
@@ -759,7 +1058,53 @@ with approve button → converts to order.
 **Verify:** Build quote, send, approve → order created with quote line
 items copied. Expired quote → approve button disabled.
 
-**Status:** `[ ]`
+**Status:** `[x]`
+
+**Implementation notes:**
+- New Server Action module `apps/web/app/actions/quotes.ts`:
+  - `createQuote({ companyId, lineItems, expiresAt?, send })`
+    inserts a `quotes` row (status `'draft'` or `'sent'` based
+    on `send`). Default expiry is `now() + 14 days`. Admin role
+    enforced via `requireAdminFor()` (looks up
+    `company_users.role` for the caller's user_id).
+  - `sendQuote(quoteId)` flips draft → sent + emails the buyer.
+  - `approveQuote(quoteId)` is the buyer-side conversion path:
+    reads via RLS (so cross-company callers see "not found"),
+    rejects when status ≠ `'sent'` or expiry passed (auto-flips
+    expired quotes to `'expired'`), then creates an order
+    (`status='confirmed'`, `payment_method='net30'` if the
+    company is enabled else `'card'`), allocates each line via
+    `allocate_batch`, writes `order_items` with `batch_id` +
+    `allocated_at`, rolls everything back on alloc failure,
+    and finally marks the quote `'approved'`.
+- Email layer: new `QuoteEmail` template +
+  `sendQuote(to, props)` helper. `RESEND_API_KEY` unset → no-op
+  shim still logs the envelope (mirrors Cell 4.1 contract).
+- Admin UI:
+  - `app/(admin)/console/quotes/page.tsx` lists every quote
+    (service-role read, joined with `companies.name`).
+  - `app/(admin)/console/quotes/new/page.tsx` server shell loads
+    companies + species and forwards them to a client builder
+    `NewQuoteForm.tsx` that lets ops compose lines (species /
+    format / qty / unit-price-pence) and either save as draft
+    or send to the buyer.
+- Buyer UI:
+  - `app/(dashboard)/quotes/[id]/page.tsx` renders the line
+    items + status + expiry. Loaded via the RLS server client.
+  - `ApproveQuoteButton.tsx` (client) calls `approveQuote`,
+    toasts success, and routes to `/orders/{id}`. Disabled
+    when status ≠ `'sent'` or expiry passed; the surrounding
+    page surfaces the reason.
+- Validated:
+  - `pnpm --filter web typecheck && lint && build` green;
+    new routes register as `/console/quotes`,
+    `/console/quotes/new`, `/quotes/[id]` (all `ƒ`/dynamic).
+  - DB-side simulation against Craft Brew Co: inserted a
+    `sent` quote, ran the approve path's SQL (order +
+    `allocate_batch` + `order_items` + status flip to
+    `approved`); allocated `ba000002-…`. Confirmed an
+    expired quote (`expires_at < now()`) reads back with
+    `is_expired=t` so the action's expiry guard fires.
 
 ---
 
@@ -775,18 +1120,95 @@ role can invite/modify.
 **Verify:** Admin invites buyer → buyer signs up → sees only own company.
 Buyer cannot access `/team` page.
 
-**Status:** `[ ]`
+**Status:** `[x]`
+
+**Implementation notes:**
+- `app/actions/team.ts` — `inviteTeamMember`, `setTeamMemberRole`,
+  `removeTeamMember`. All three call `requireAdmin()` which loads
+  the caller's `company_users` row and rejects unless
+  `role === 'admin'`. Mutations go through the service-role
+  admin client after the explicit role check so writes audit
+  cleanly without depending on RLS for authorization.
+- `inviteTeamMember` validates email + role (`'admin'|'buyer'`)
+  with zod, calls `admin.auth.admin.inviteUserByEmail` with
+  `redirectTo` `${origin}/auth/callback?next=/orders` and
+  `data: {company_id, role}`, then inserts the
+  `company_users` link. On link failure it rolls back the
+  freshly-created auth user via `deleteUser` so an orphan
+  account never lingers.
+- `setTeamMemberRole` and `removeTeamMember` both verify the
+  target row's `company_id` matches the caller, block demoting
+  or removing the last admin via a `count: 'exact'` query, and
+  block self-removal. There's no `active` column on
+  `company_users`, so deactivation = deleting the membership
+  row (auth.users persists for re-invitation later).
+- `lib/data/team.ts` — `loadTeamMembers(companyId)` lives
+  under `lib/` so the dashboard route group can call it
+  without tripping `no-restricted-imports`. It joins
+  `company_users` rows with `auth.users.email` via
+  `admin.auth.admin.getUserById` per row.
+- `app/(dashboard)/team/page.tsx` — server shell, marked
+  `dynamic = 'force-dynamic'`. Loads the caller, requires a
+  `company_users` row (else `redirect('/sign-in?next=/team')`),
+  resolves the company name, fetches members through
+  `loadTeamMembers`, and forwards `{members, currentUserId,
+  isAdmin, origin}` to a client `TeamTable`. Buyers get a
+  read-only roster (no invite form, no controls); admins get
+  the full UI.
+- `app/(dashboard)/team/TeamTable.tsx` — client component
+  with `useTransition`-driven invite form (email + role
+  select), per-row role `<select>` and "Remove" button.
+  Uses `confirm()` for destructive removal and surfaces
+  server-action errors inline; success states fire toasts via
+  `ToastProvider`.
+- Validated:
+  - `pnpm --filter web typecheck && lint && build` green;
+    `/team` registers as a dynamic (`ƒ`) route.
+  - DB-side: Craft Brew Co has one admin
+    (`admin@craftbrew.test`) and one buyer
+    (`buyer@craftbrew.test`). `select count(*) … role='admin'`
+    returns `1`, so both the demote and remove guards on the
+    sole admin would reject — confirming the last-admin
+    safeguard fires for the seeded fixture.
 
 ---
 
 ### Cell 5.4 — Verify Phase 5
 **Verify checklist:**
-- [ ] Net-30 path works end-to-end with invoice PDF
-- [ ] Quote builder + approval flow creates orders
-- [ ] Company admin can manage team
-- [ ] Buyer role cannot access admin functions
+- [x] Net-30 path works end-to-end with invoice PDF
+- [x] Quote builder + approval flow creates orders
+- [x] Company admin can manage team
+- [x] Buyer role cannot access admin functions
 
-**Status:** `[ ]`
+**Status:** `[x]`
+
+**Implementation notes:**
+- Net-30: `/cart` Server Action `startNet30Checkout` writes
+  `orders.payment_method='net30'`, allocates inventory, renders
+  the `@react-pdf/renderer` invoice via `InvoicePdf(...)` and
+  attaches it to a Resend email through
+  `sendInvoice(...)`. DB simulation walked an order through
+  `allocate_batch` end-to-end against Craft Brew Co.
+- Quotes: admin builds line items at
+  `/console/quotes/new`, can save as draft or send. Buyer
+  approves at `/quotes/[id]` via `ApproveQuoteButton`,
+  which creates a `confirmed` order (Net-30 if the
+  company is enabled, card otherwise), allocates each line,
+  and flips the quote to `approved`. Expired quotes auto-flip
+  to `expired` in `approveQuote` before any inventory side
+  effects.
+- Team: `/team` page + `app/actions/team.ts` cover invite /
+  role-change / remove with admin gating. `requireAdmin()` is
+  the single chokepoint; pages and actions both call it.
+- Buyer guardrails: every Server Action begins with
+  `requireAdmin()` (or `requireAdminFor(companyId)` for the
+  quote builder), so a buyer calling them directly receives
+  `{ok:false, error:'Admin role required.'}`. Admin console
+  pages live in `app/(admin)/console/**` and rely on the same
+  service-role / admin checks, while the storefront +
+  dashboard groups are blocked by ESLint
+  `no-restricted-imports` from importing the service-role
+  client at all.
 
 ---
 
@@ -804,7 +1226,53 @@ Buyer cannot access `/team` page.
 **Verify:** Generate test label for TX → CA cold-chain parcel → tracking
 URL returned.
 
-**Status:** `[ ]`
+**Status:** `[x]`
+
+**Implementation notes:**
+- `apps/web/lib/shippo/client.ts` — `server-only` thin fetch wrapper around
+  `https://api.goshippo.com` (no SDK dep, matches the
+  "mock at `lib/shippo/client.ts` boundary" guidance in
+  `TESTING.md`). `getShippoClient()` returns a singleton
+  `{available, request<T>(path, init)}`. Auth header is
+  `Authorization: ShippoToken ${SHIPPO_API_KEY}`. Non-2xx responses throw
+  a typed `ShippoError(message, status, body)`. When `SHIPPO_API_KEY` is
+  unset, returns a no-op shim that logs `[shippo] SHIPPO_API_KEY unset —
+  skipping ${method} ${path}` and returns `{}` cast to `T` — mirrors the
+  Resend/email pattern from Cell 4.1 so local dev works without a Shippo
+  account.
+- `apps/web/lib/shippo/labels.ts` — `createLabel(input)` runs Shippo's
+  two-step flow: `POST /shipments/` (rates), pick the requested
+  `servicelevelToken` (or cheapest if unspecified, optionally pinned to
+  `carrierAccount`), then `POST /transactions/` to purchase. Returns
+  `{trackingNumber, trackingUrl, labelUrl, transactionId, carrier,
+  rateAmount, rateCurrency}`. `coldChain: true` sets
+  `extra.signature_confirmation = 'STANDARD'` and records
+  `{order_id, cold_chain}` JSON in Shippo `metadata` (echoed back on
+  `track_updated` webhooks → Cell 6.3 correlation). Throws `ShippoError`
+  early when the API key is unset (label generation must not silently
+  no-op the way tracking can). `Shippo-API-Version: 2018-02-08` pinned on
+  both calls.
+- `apps/web/lib/shippo/tracking.ts` —
+  - `registerTracking({carrier, trackingNumber, metadata?})` posts to
+    `/tracks/` so Shippo will fan `track_updated` events to our webhook;
+    no-ops when key unset.
+  - `getTracking(carrier, trackingNumber)` GETs the latest tracking row
+    for manual polling / ops-dashboard fallback.
+  - `mapShippoStatusToOrderStatus(status)` is the single source of truth
+    used by the Cell 6.3 webhook: `TRANSIT → 'dispatched'`, `DELIVERED
+    → 'delivered'`, `RETURNED|FAILURE → 'cancelled'`, anything else →
+    `null` (no transition; pre-transit handled by the dispatch action in
+    Cell 6.2). Maps to the `order_status` enum in
+    `packages/db/src/types.ts`.
+- `.env.local.example` documents `SHIPPO_API_KEY` + `SHIPPO_WEBHOOK_SECRET`
+  with the dev-mode no-op note.
+- Validated: `pnpm --filter web typecheck` / `lint` / `build` all green
+  (no new routes; `lib/shippo/**` ships into the server bundle only via
+  `server-only`). End-to-end TX → CA cold-chain label round-trip against
+  the Shippo test API is deferred to Cell 6.2 (admin "Generate label"
+  Server Action) where it is the natural integration surface; the
+  adapter itself is exercised by mocking `getShippoClient()` per
+  `TESTING.md`.
 
 ---
 

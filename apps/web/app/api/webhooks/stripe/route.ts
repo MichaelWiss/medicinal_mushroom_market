@@ -31,6 +31,12 @@ import { NextResponse } from 'next/server';
 import type Stripe from 'stripe';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { getStripe } from '@/lib/stripe/server';
+import { getCompanyEmails } from '@/lib/email/recipients';
+import {
+  orderUrl,
+  sendBackorderNotice,
+  sendOrderConfirmation,
+} from '@/lib/email/send';
 
 // Force the Node.js runtime — the Stripe SDK relies on Node crypto for
 // signature verification and `stream` APIs not available on the Edge
@@ -103,7 +109,7 @@ async function handleCheckoutCompleted(
   // the order has moved past `pending`.
   const { data: order, error: orderErr } = await supabase
     .from('orders')
-    .select('id, status')
+    .select('id, status, company_id, total_price, dispatch_date')
     .eq('id', orderId)
     .maybeSingle();
 
@@ -119,7 +125,7 @@ async function handleCheckoutCompleted(
 
   const { data: items, error: itemsErr } = await supabase
     .from('order_items')
-    .select('id, species_id, quantity, batch_id')
+    .select('id, species_id, quantity, unit_price, format, batch_id, species:species_id(common_name)')
     .eq('order_id', orderId);
 
   if (itemsErr || !items || items.length === 0) {
@@ -182,11 +188,34 @@ async function handleCheckoutCompleted(
   }
 
   if (failed.length > 0) {
-    // Backorder path. Email wiring (Resend) lands in Phase 4 / Cell 4.1.
+    // Backorder path. Email buyers so they know we're short on stock and
+    // leave the order in `pending` for the next webhook re-delivery (or
+    // ops intervention) to finish allocating.
     console.warn('[stripe-webhook] backorder: leaving order pending', {
       orderId,
       failedItems: failed.map((f) => f.itemId),
     });
+    const failedSpecies = failed
+      .map((f) => items.find((i) => i.id === f.itemId))
+      .map((row) => {
+        const sp = row?.species as { common_name?: string } | null | undefined;
+        return sp?.common_name ?? 'Unknown species';
+      });
+    const recipients = await getCompanyEmails(order.company_id);
+    for (const to of recipients) {
+      const result = await sendBackorderNotice(to, {
+        orderRef: orderId,
+        speciesNames: failedSpecies,
+        orderUrl: orderUrl(orderId),
+      });
+      if (!result.ok) {
+        console.error('[stripe-webhook] backorder email failed', {
+          orderId,
+          to,
+          error: result.error,
+        });
+      }
+    }
     return;
   }
 
@@ -202,5 +231,36 @@ async function handleCheckoutCompleted(
       orderId,
       confirmErr,
     });
+    return;
+  }
+
+  // Order is fully allocated and confirmed — send order-confirmation
+  // mail to every buyer associated with the company.
+  const recipients = await getCompanyEmails(order.company_id);
+  if (recipients.length === 0) return;
+  const lines = items.map((item) => {
+    const sp = item.species as { common_name?: string } | null | undefined;
+    return {
+      speciesName: sp?.common_name ?? 'Unknown species',
+      format: item.format,
+      quantity: item.quantity,
+      unitPrice: item.unit_price,
+    };
+  });
+  for (const to of recipients) {
+    const result = await sendOrderConfirmation(to, {
+      orderRef: orderId,
+      totalPrice: order.total_price,
+      dispatchDate: order.dispatch_date,
+      lines,
+      orderUrl: orderUrl(orderId),
+    });
+    if (!result.ok) {
+      console.error('[stripe-webhook] confirmation email failed', {
+        orderId,
+        to,
+        error: result.error,
+      });
+    }
   }
 }

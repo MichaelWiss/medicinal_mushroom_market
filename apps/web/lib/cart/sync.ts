@@ -9,7 +9,7 @@
 'use server';
 
 import { createClient } from '@/lib/supabase/server';
-import { cartArraySchema, parseCart, type CartLine } from './store';
+import { cartArraySchema, parseCart, type CartLine } from './schema';
 
 export async function loadServerCart(): Promise<CartLine[] | null> {
   const supabase = await createClient();

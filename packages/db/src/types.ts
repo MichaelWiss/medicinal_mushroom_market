@@ -378,6 +378,7 @@ export type Database = {
           quantity: number
           species_id: string
           stripe_sub_id: string | null
+          unit_price: number
           updated_at: string
         }
         Insert: {
@@ -392,6 +393,7 @@ export type Database = {
           quantity: number
           species_id: string
           stripe_sub_id?: string | null
+          unit_price?: number
           updated_at?: string
         }
         Update: {
@@ -406,6 +408,7 @@ export type Database = {
           quantity?: number
           species_id?: string
           stripe_sub_id?: string | null
+          unit_price?: number
           updated_at?: string
         }
         Relationships: [

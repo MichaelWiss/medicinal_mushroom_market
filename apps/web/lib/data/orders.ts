@@ -107,10 +107,10 @@ export async function loadOrderHistory(): Promise<OrderHistoryRow[] | null> {
       : '—';
 
     // If every line shares a format, surface it; otherwise show "Mixed".
-    const formats = new Set(items.map((it) => it.format));
+    const formats = [...new Set(items.map((it) => it.format))];
     const formatLabel =
-      formats.size === 1
-        ? formatLabelFor([...formats][0])
+      formats.length === 1
+        ? formatLabelFor(formats[0]!)
         : items.length > 0
           ? 'Mixed'
           : '—';

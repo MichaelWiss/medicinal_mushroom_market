@@ -373,6 +373,16 @@ deno_version = 2
 # [edge_runtime.secrets]
 # secret_key = "env(SECRET_VALUE)"
 
+# ── Edge Functions ──────────────────────────────────────────
+# subscription-engine (Cell 4.3)
+# Schedule: 0 6 * * MON  — wired in production via pg_cron + pg_net
+# (see migration 20260501000002_subscription_engine_cron.sql).
+# verify_jwt is disabled because the function is invoked by
+# Supabase scheduled jobs and validates its own bearer token
+# (`SUBSCRIPTION_ENGINE_SECRET`, defaulting to the service-role key).
+[functions.subscription-engine]
+verify_jwt = false
+
 [analytics]
 enabled = true
 port = 54327

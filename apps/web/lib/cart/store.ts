@@ -13,19 +13,13 @@
 
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
-import { z } from 'zod';
-import {
-  cartItemSchema,
-  calculateOrderTotal,
-  type CartItemInput,
-  type CompanyTier,
-} from '@repo/shared';
+import { calculateOrderTotal, type CompanyTier } from '@repo/shared';
+import { cartArraySchema, parseCart, type CartLine } from './schema';
 
-const cartArraySchema = z.array(cartItemSchema);
+export { cartArraySchema, parseCart };
+export type { CartLine };
 
 const STORAGE_KEY = 'mycelium.cart.v1';
-
-export type CartLine = CartItemInput;
 
 export type CartState = {
   /** Items in display order (insertion order). */
@@ -108,18 +102,6 @@ export const useCartStore = create<CartState>()(
     },
   ),
 );
-
-/**
- * Validates an arbitrary unknown payload against `cartSchema` and returns
- * the parsed array, or `[]` if invalid. Used by the server-cart loader.
- */
-export function parseCart(raw: unknown): CartLine[] {
-  if (!raw) return [];
-  const parsed = cartArraySchema.safeParse(raw);
-  return parsed.success ? parsed.data : [];
-}
-
-export { cartArraySchema };
 
 /** Total items (sum of quantities). */
 export function cartCount(items: CartLine[]): number {

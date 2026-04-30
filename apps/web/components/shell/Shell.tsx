@@ -7,7 +7,7 @@ import { Topbar } from './Topbar';
 import { StorefrontTopbarRight } from '@/components/cart/StorefrontTopbarRight';
 
 // Routes that should show the storefront topbar (cart, quote CTA).
-const STOREFRONT_PATHS = new Set(['/', '/subscriptions', '/quotes']);
+const STOREFRONT_PATHS = new Set(['/', '/quotes']);
 
 // Mirrors /demo/myellium.html `TITLES` map (line 999). Keeps the sticky
 // topbar caption in sync with the active route so behaviour matches the demo

@@ -11,6 +11,9 @@
     "traceability:seed-coa": "pnpm dlx tsx --env-file=.env.local scripts/seed-coa.ts"
   },
   "dependencies": {
+    "@react-email/components": "^1.0.12",
+    "@react-email/render": "^2.0.8",
+    "@react-pdf/renderer": "^4.5.1",
     "@repo/db": "workspace:*",
     "@repo/shared": "workspace:*",
     "@supabase/ssr": "^0.10.2",
@@ -18,6 +21,7 @@
     "next": "^15.1.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "resend": "^6.12.2",
     "stripe": "^22.1.0",
     "zod": "^4.3.6",
     "zustand": "^5.0.12"

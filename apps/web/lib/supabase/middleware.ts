@@ -8,7 +8,7 @@ import type { Database } from '@repo/db';
  *
  * Mirrors the (dashboard) and (admin) route groups.
  */
-const PROTECTED_PREFIXES = ['/orders', '/traceability', '/console'];
+const PROTECTED_PREFIXES = ['/orders', '/traceability', '/subscriptions', '/console'];
 
 /**
  * Refreshes the Supabase auth cookies on every request and enforces auth
