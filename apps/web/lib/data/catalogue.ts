@@ -13,8 +13,6 @@ import type { FormatKey, SpeciesKey } from './species';
 export type CatalogueSpecies = {
   /** DB uuid — primary key, used for Realtime correlation. */
   id: string;
-  /** Numeric id understood by the demo CartProvider (Cell 2.7 will replace). */
-  cartId: number;
   /** Two-digit catalogue number. */
   num: string;
   /** Presentation key for IMGS / BG colour map. */
@@ -92,7 +90,6 @@ export async function loadCatalogue(): Promise<CatalogueSpecies[]> {
     const p = presentationFor(s.latin_name);
     return {
       id: s.id,
-      cartId: p.cartId,
       num: p.num,
       key: p.key,
       name: s.common_name,

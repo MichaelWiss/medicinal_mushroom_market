@@ -82,6 +82,25 @@ insert into auth.users (
     now(), now()
   );
 
+-- GoTrue (>= v2.188) scans these token columns into Go strings and rejects
+-- NULLs ("converting NULL to string is unsupported" → 500 on /otp).
+-- Force empty strings on the seeded rows so magic-link sign-in works.
+update auth.users
+   set confirmation_token        = coalesce(confirmation_token, ''),
+       recovery_token             = coalesce(recovery_token, ''),
+       email_change_token_new     = coalesce(email_change_token_new, ''),
+       email_change_token_current = coalesce(email_change_token_current, ''),
+       email_change               = coalesce(email_change, ''),
+       phone_change               = coalesce(phone_change, ''),
+       phone_change_token         = coalesce(phone_change_token, ''),
+       reauthentication_token     = coalesce(reauthentication_token, '')
+ where email in (
+   'admin@craftbrew.test',
+   'buyer@craftbrew.test',
+   'buyer1@nutrilabs.test',
+   'buyer2@nutrilabs.test'
+ );
+
 -- ── Auth identities (required for magic-link flow) ────────────
 insert into auth.identities (
   id, provider_id, user_id, identity_data,

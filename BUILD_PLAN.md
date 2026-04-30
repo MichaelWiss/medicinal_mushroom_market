@@ -486,7 +486,33 @@ cross-device persistence.
 **Verify:** Add items as anon → reload page → cart preserved. Sign in →
 cart syncs to DB. Sign out → reset.
 
-**Status:** `[ ]`
+**Status:** `[x]` — Closed 2026-04-29.
+- Migration `20260429000001_carts.sql` adds `public.carts (user_id pk →
+  auth.users on delete cascade, items jsonb default '[]', updated_at)` plus
+  4 RLS policies (`user_id = auth.uid()`) and a `moddatetime` trigger.
+- `apps/web/lib/cart/store.ts` — Zustand store with `persist` middleware,
+  localStorage key `mycelium.cart.v1`. Items keyed by
+  `${speciesId}:${format}` so the same species in different formats are
+  distinct lines. Helpers: `cartCount`, `cartTotalPence` (uses
+  `@repo/shared` `calculateOrderTotal`), `parseCart`.
+- `apps/web/lib/cart/sync.ts` — Server Actions `loadServerCart()` /
+  `saveServerCart()` / `clearServerCart()`, validating with `cartItemSchema`.
+- `apps/web/components/cart/CartProvider.tsx` rewritten as a render-less
+  sync engine: bootstraps session on mount, reacts to
+  `auth.onAuthStateChange` (SIGNED_IN → server-cart-wins or push local;
+  SIGNED_OUT → clear), debounces local writes (600ms) back to the DB.
+  `useCart()` re-exported as a Zustand selector for backward compat.
+- `CartDrawer.tsx` ports demo markup but renders real items: per-line
+  format label, +/− quantity stepper via `setQty`, GBP line price from
+  integer pence.
+- `CatalogueList.tsx`, `AddToCartButton.tsx`, `species/[id]/page.tsx`
+  now construct full `CartItemInput` payloads (`speciesId`,
+  `speciesName`, `format`, `unitPrice` in pence, `quantity:1`); first
+  format used for catalogue rows, exact format used on the detail page.
+- Demo `cartId: number` field dropped from `CatalogueSpecies`,
+  `SpeciesPresentation`, and `SpeciesDetail`.
+- Verified: `pnpm --filter web typecheck && lint && build` all green;
+  `carts` table present with expected columns.
 
 ---
 
@@ -501,7 +527,16 @@ remove, calls `calculateOrderTotal` for subtotal display.
 **Verify:** Increase qty above volume break → discount applied, total
 decreases.
 
-**Status:** `[ ]`
+**Status:** `[x]` — `app/(storefront)/cart/page.tsx` (client) renders the
+Zustand cart full-page: per-line `calculateLinePrice(unitPrice, qty,
+'spot')` with a "Saved £x" caption when a volume bracket (10/50/100/500)
+kicks in, and a sidebar summary showing undiscounted subtotal, total
+volume discount, and `calculateOrderTotal` total. +/− steppers reuse the
+existing `setQty`/`remove` actions; "Empty cart" calls `clear`. Empty
+state CTAs back to `/`. `CartDrawer` gains a "View full cart" link to
+`/cart`. Tier hard-coded to `spot` until authenticated checkout (Cell
+3.3) threads buyer tier. `pnpm --filter web typecheck`/`lint`/`build`
+all green; `/cart` builds as `○` static (3.22 kB).
 
 ---
 
@@ -521,7 +556,34 @@ correct line items.
 to cart, order remains `pending`. Try to dispatch on Friday for a Mon-only
 species → action throws, no order created.
 
-**Status:** `[ ]`
+**Status:** `[x]` — `apps/web/app/actions/checkout.ts` (`startCheckout`)
+authenticates the buyer, resolves `company_id` + `tier` via
+`company_users → companies`, validates the cart shape with `cartSchema`,
+re-fetches live `available_units` per species (sum across passing batches
+— never trusts client state), and rejects when the user-selected
+`dispatchDate` is not in the species `dispatch_window` (helper:
+`apps/web/lib/checkout/dispatch.ts` — `isDispatchAllowed`, `nextMonday`,
+`toISODate`, all UTC). Per-line discounted unit amount is computed via
+`@repo/shared` `calculateLinePrice` and used both for the Stripe
+`price_data.unit_amount` and the `order_items.unit_price` so DB ↔ Stripe
+totals reconcile (`orders.total_price` = sum of Stripe line subtotals).
+Order is inserted as `status='pending', payment_method='card'` with the
+chosen `dispatch_date`; failure to insert items rolls the order back.
+Stripe Checkout Session created with `mode:'payment'`, currency `gbp`,
+session + payment-intent metadata `{order_id, company_id}`,
+`success_url=/orders?checkout=success`, `cancel_url=/cart?checkout=cancelled`,
+and an idempotency key of `order:${order.id}`. `stripe_session_id` is
+written back to the order. `lib/stripe/server.ts` provides a
+`server-only` singleton pinned to API version `2026-04-22.dahlia`. Cart
+page (`app/(storefront)/cart/page.tsx`) gains a dispatch-date input
+(default = next Monday) and a CTA that calls the action via
+`useTransition`, surfaces typed errors inline, redirects unauthenticated
+users to `/sign-in?next=/cart`, and on success does a hard
+`window.location.assign(stripeUrl)`. `.env.local.example` documents
+`STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`,
+and optional `NEXT_PUBLIC_SITE_URL`. Webhook + batch allocation land in
+Cell 3.4. `pnpm --filter web typecheck`/`lint`/`build` all green
+(`/cart` 4.4 kB static).
 
 ---
 
@@ -540,7 +602,31 @@ Resend wiring stubbed for now).
 + `stripe trigger checkout.session.completed` → order transitions to
 `confirmed`, batch units decremented atomically.
 
-**Status:** `[ ]`
+**Status:** `[~]` — Handler implemented in
+`apps/web/app/api/webhooks/stripe/route.ts` (Node runtime,
+`force-dynamic`, raw-body via `request.text()`). Verifies signature with
+`STRIPE_WEBHOOK_SECRET`; on bad signature returns 400 (Stripe retries).
+On `checkout.session.completed` it reads `metadata.order_id` (set in
+Cell 3.3), fetches the order with the service-role client (no end-user
+session on a webhook; route lives outside `(storefront)/(dashboard)` so
+the ESLint admin guard does not apply), short-circuits when the order
+is no longer `pending` (idempotent re-delivery), then for each
+`order_items` row calls the race-safe RPC
+`allocate_batch(p_species_id, p_qty)` from Cell 1.5. Lines that already
+carry a `batch_id` are skipped (partial-allocation re-entry safe). Each
+successful allocation writes `batch_id` + `allocated_at` guarded by
+`.is('batch_id', null)` so a second delivery cannot double-write. If
+*every* line allocates, the order is moved to `confirmed` with a
+`status='pending'` predicate to avoid racing a concurrent delivery; if
+*any* line fails (RPC error or insufficient stock → null) the order is
+left `pending` and a `console.warn` "backorder" marker is emitted (real
+Resend wiring lands in Cell 4.1). Amounts are NOT re-derived from the
+Stripe payload — only `metadata.order_id` is trusted after signature
+verification. `pnpm --filter web typecheck`/`lint`/`build` all green
+(`/api/webhooks/stripe` builds as `ƒ` dynamic). End-to-end
+`stripe listen` + `stripe trigger checkout.session.completed` smoke
+test still pending — will run on local Supabase to confirm allocation +
+status flip.
 
 ---
 
@@ -882,7 +968,7 @@ Monday, `last_cron_run` is stale → alert (manual for v1).
 | 2.5 | Species Detail Page | Catalog | `[ ]` |
 | 2.6 | Batch Traceability View | Catalog | `[x]` |
 | 2.7 | Verify Phase 2 | Catalog | `[x]` |
-| 3.1 | Cart State | Checkout | `[ ]` |
+| 3.1 | Cart State | Checkout | `[x]` |
 | 3.2 | Cart Page | Checkout | `[ ]` |
 | 3.3 | Checkout Server Action | Checkout | `[ ]` |
 | 3.4 | Stripe Webhook Handler | Checkout | `[ ]` |

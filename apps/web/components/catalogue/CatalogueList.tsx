@@ -12,7 +12,7 @@ import type { Route } from 'next';
 import { BG, IMGS } from '@/lib/data/species';
 import { FMT } from '@/lib/data/species';
 import type { CatalogueSpecies } from '@/lib/data/catalogue';
-import { useCart } from '@/components/cart/CartProvider';
+import { useCartStore } from '@/lib/cart/store';
 import { createClient } from '@/lib/supabase/browser';
 
 type FilterKey = 'all' | 'fresh' | 'powder' | 'spawn' | 'culture' | 'instock';
@@ -39,7 +39,8 @@ export function CatalogueList({
 }) {
   const [filter, setFilter] = useState<FilterKey>('all');
   const [species, setSpecies] = useState<CatalogueSpecies[]>(initialSpecies);
-  const { add } = useCart();
+  const add = useCartStore((s) => s.add);
+  const setOpen = useCartStore((s) => s.setOpen);
 
   // Subscribe to batch changes and recompute per-species unit counts.
   // We re-fetch the passing-batch slice on any change rather than tracking
@@ -170,8 +171,19 @@ export function CatalogueList({
                   <button
                     type="button"
                     className="sp-add"
-                    disabled={!ok || s.cartId === 0}
-                    onClick={() => add(s.cartId)}
+                    disabled={!ok}
+                    onClick={() => {
+                      const firstFormat = s.formats[0];
+                      if (!firstFormat) return;
+                      add({
+                        speciesId: s.id,
+                        speciesName: s.name,
+                        format: firstFormat,
+                        unitPrice: Math.round(s.price * 100),
+                        quantity: 1,
+                      });
+                      setOpen(true);
+                    }}
                   >
                     {ok ? '+ Add to cart' : 'Out of stock'}
                   </button>

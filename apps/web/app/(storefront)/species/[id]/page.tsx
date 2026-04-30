@@ -142,8 +142,14 @@ export default async function SpeciesDetailPage({
                     </div>
                   </div>
                   <AddToCartButton
-                    cartId={detail.cartId}
-                    disabled={!inStock || detail.cartId === 0}
+                    item={{
+                      speciesId: detail.id,
+                      speciesName: detail.commonName,
+                      format: f.format,
+                      unitPrice: Math.round(f.tierPrice * 100),
+                      quantity: 1,
+                    }}
+                    disabled={!inStock}
                     label={inStock ? '+ Add to cart' : 'Out of stock'}
                   />
                 </div>

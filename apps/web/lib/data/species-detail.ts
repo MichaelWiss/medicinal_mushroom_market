@@ -36,7 +36,6 @@ export type SpeciesDetail = {
   id: string;
   num: string;
   key: SpeciesKey;
-  cartId: number;
   commonName: string;
   latinName: string;
   substrateType: string;
@@ -162,7 +161,6 @@ export async function loadSpeciesDetail(
     id: species.id,
     num: presentation.num,
     key: presentation.key,
-    cartId: presentation.cartId,
     commonName: species.common_name,
     latinName: species.latin_name,
     substrateType: species.substrate_type,

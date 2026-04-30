@@ -78,6 +78,10 @@ export function SignInForm({ next }: { next: string }) {
         onChange={(e) => setEmail(e.target.value)}
         placeholder="buyer@company.com"
         className="mt-3 w-full border-b-[3px] border-dotted border-[color:var(--dot)] bg-transparent py-2 font-serif text-[20px] italic text-ink outline-none placeholder:text-ink3"
+        // Password-manager extensions inject inline `style` attributes
+        // (background-image icons) onto credential inputs after SSR,
+        // which trips React's hydration check. Suppress here only.
+        suppressHydrationWarning
       />
       <button
         type="submit"

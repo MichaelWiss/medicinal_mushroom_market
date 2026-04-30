@@ -1,108 +1,139 @@
 'use client';
 
-// Cart context — mirrors the demo's `cart`, `addCart`, `rmCart`,
-// `renderCart` helpers. State persists to localStorage so the drawer survives
-// page navigation. Real backed-cart wiring lands in Cell 2.7 (orders).
+// Cart sync mount + selector hook (Cell 3.1).
+//
+// `<CartProvider>` is a render-less side-effect component:
+//   - waits for the Zustand persist middleware to hydrate from localStorage,
+//   - subscribes to Supabase auth changes,
+//   - on SIGNED_IN: pulls the server cart; if non-empty it wins (cross-device
+//     continuity), otherwise the local cart is pushed to the server,
+//   - on SIGNED_OUT: clears the local store,
+//   - debounces local writes back to the server while authenticated.
+//
+// `useCart()` is a thin selector wrapper around the Zustand store so existing
+// consumers keep a familiar API surface. New code can use `useCartStore`
+// directly with custom selectors.
 
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useState,
-} from 'react';
+import { useEffect, useRef } from 'react';
 import type { ReactNode } from 'react';
-import { speciesById } from '@/lib/data/species';
-import { useToast } from '@/components/ui/ToastProvider';
+import { createClient } from '@/lib/supabase/browser';
+import {
+  cartCount,
+  cartTotalPence,
+  useCartStore,
+  type CartLine,
+} from '@/lib/cart/store';
+import { loadServerCart, saveServerCart } from '@/lib/cart/sync';
 
-const STORAGE_KEY = 'mycelium.cart.v1';
-const AGREEMENT_DISCOUNT = 0.9; // demo applies a flat -10% agreement price
+const SAVE_DEBOUNCE_MS = 600;
 
-export type CartLine = { id: number; qty: number };
+function CartSyncEngine() {
+  const isAuthedRef = useRef(false);
+  const lastSavedRef = useRef<string>('');
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-type CartCtx = {
-  lines: CartLine[];
-  count: number;
-  total: number;
-  open: boolean;
-  add: (id: number) => void;
-  remove: (id: number) => void;
-  setOpen: (open: boolean) => void;
-};
+  // Auth lifecycle: SIGNED_IN merges server ↔ local; SIGNED_OUT clears local.
+  useEffect(() => {
+    const supabase = createClient();
+    let cancelled = false;
 
-const Ctx = createContext<CartCtx | null>(null);
+    async function onSignedIn() {
+      const server = await loadServerCart();
+      if (cancelled) return;
+      isAuthedRef.current = true;
+      const localItems = useCartStore.getState().items;
 
-export function useCart(): CartCtx {
-  const c = useContext(Ctx);
-  if (!c) throw new Error('useCart must be used inside <CartProvider>');
-  return c;
+      if (server && server.length > 0) {
+        // Server cart wins on first sign-in: cross-device continuity.
+        useCartStore.getState().replace(server);
+        lastSavedRef.current = JSON.stringify(server);
+      } else if (localItems.length > 0) {
+        // No server cart yet — push the local cart up.
+        await saveServerCart(localItems);
+        lastSavedRef.current = JSON.stringify(localItems);
+      } else {
+        lastSavedRef.current = '[]';
+      }
+    }
+
+    function onSignedOut() {
+      isAuthedRef.current = false;
+      lastSavedRef.current = '';
+      useCartStore.getState().clear();
+    }
+
+    // Bootstrap: check current session on mount.
+    supabase.auth.getSession().then(({ data }) => {
+      if (cancelled) return;
+      if (data.session) onSignedIn();
+    });
+
+    const { data: sub } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') onSignedIn();
+      if (event === 'SIGNED_OUT') onSignedOut();
+    });
+
+    return () => {
+      cancelled = true;
+      sub.subscription.unsubscribe();
+    };
+  }, []);
+
+  // Debounced server upsert when the local items change while authenticated.
+  useEffect(() => {
+    const unsub = useCartStore.subscribe((state, prev) => {
+      if (state.items === prev.items) return;
+      if (!isAuthedRef.current) return;
+      const serialized = JSON.stringify(state.items);
+      if (serialized === lastSavedRef.current) return;
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = setTimeout(async () => {
+        const items: CartLine[] = useCartStore.getState().items;
+        const ok = await saveServerCart(items);
+        if (ok) lastSavedRef.current = serialized;
+      }, SAVE_DEBOUNCE_MS);
+    });
+    return () => {
+      unsub();
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    };
+  }, []);
+
+  return null;
 }
 
 export function CartProvider({ children }: { children: ReactNode }) {
-  const { toast } = useToast();
-  const [lines, setLines] = useState<CartLine[]>([]);
-  const [open, setOpen] = useState(false);
-  const [hydrated, setHydrated] = useState(false);
-
-  // Hydrate from localStorage once on the client.
-  useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem(STORAGE_KEY);
-      if (raw) setLines(JSON.parse(raw) as CartLine[]);
-    } catch {
-      // ignore corrupt storage
-    }
-    setHydrated(true);
-  }, []);
-
-  useEffect(() => {
-    if (!hydrated) return;
-    try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(lines));
-    } catch {
-      // ignore quota errors
-    }
-  }, [lines, hydrated]);
-
-  const add = useCallback(
-    (id: number) => {
-      const sp = speciesById(id);
-      if (!sp) return;
-      setLines((prev) => {
-        const i = prev.findIndex((l) => l.id === id);
-        if (i === -1) return [...prev, { id, qty: 1 }];
-        const existing = prev[i];
-        if (!existing) return [...prev, { id, qty: 1 }];
-        const next = [...prev];
-        next[i] = { id, qty: existing.qty + 1 };
-        return next;
-      });
-      toast(`${sp.name} added to cart`);
-    },
-    [toast],
+  return (
+    <>
+      <CartSyncEngine />
+      {children}
+    </>
   );
+}
 
-  const remove = useCallback((id: number) => {
-    setLines((prev) => prev.filter((l) => l.id !== id));
-  }, []);
+/**
+ * Convenience selector for legacy consumers. New code may prefer pulling
+ * narrower slices from `useCartStore` directly to minimise re-renders.
+ */
+export function useCart() {
+  const items = useCartStore((s) => s.items);
+  const open = useCartStore((s) => s.open);
+  const add = useCartStore((s) => s.add);
+  const setQty = useCartStore((s) => s.setQty);
+  const remove = useCartStore((s) => s.remove);
+  const clear = useCartStore((s) => s.clear);
+  const setOpen = useCartStore((s) => s.setOpen);
 
-  const { count, total } = useMemo(() => {
-    let c = 0;
-    let t = 0;
-    for (const l of lines) {
-      const sp = speciesById(l.id);
-      if (!sp) continue;
-      c += l.qty;
-      t += sp.price * l.qty * AGREEMENT_DISCOUNT;
-    }
-    return { count: c, total: t };
-  }, [lines]);
-
-  const value = useMemo(
-    () => ({ lines, count, total, open, add, remove, setOpen }),
-    [lines, count, total, open, add, remove],
-  );
-
-  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
+  return {
+    items,
+    lines: items, // legacy alias
+    count: cartCount(items),
+    total: cartTotalPence(items),
+    open,
+    add,
+    setQty,
+    remove,
+    clear,
+    setOpen,
+  };
 }

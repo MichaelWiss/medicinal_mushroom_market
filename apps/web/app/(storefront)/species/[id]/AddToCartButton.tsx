@@ -3,24 +3,29 @@
 // Tiny client wrapper for the cart so the species detail page can stay a
 // server component. The CartProvider lives at the app root layout.
 
-import { useCart } from '@/components/cart/CartProvider';
+import { useCartStore } from '@/lib/cart/store';
+import type { CartItemInput } from '@repo/shared';
 
 export function AddToCartButton({
-  cartId,
+  item,
   disabled,
   label,
 }: {
-  cartId: number;
+  item: CartItemInput;
   disabled?: boolean;
   label: string;
 }) {
-  const { add } = useCart();
+  const add = useCartStore((s) => s.add);
+  const setOpen = useCartStore((s) => s.setOpen);
   return (
     <button
       type="button"
       className="sp-add"
       disabled={disabled}
-      onClick={() => add(cartId)}
+      onClick={() => {
+        add(item);
+        setOpen(true);
+      }}
     >
       {label}
     </button>
