@@ -1774,7 +1774,174 @@ Monday, `last_cron_run` is stale → alert (manual for v1).
 - `pnpm --filter web typecheck && lint && build` all green; `/api/health`
   builds as `ƒ` dynamic.
 
-**Status:** `[ ]`
+---
+
+### Cell 7.5 — Verify Phase 7 + Production Readiness
+**What:** Final checklist — all Phase 7 deliverables verified.
+
+**Inputs:** Cells 7.1–7.4 complete.
+
+**Outputs:** Green build, passing tests, health check live.
+
+**Status:** `[x]`
+
+**Verification outcomes:**
+- `pnpm --filter @repo/shared test` — 50/50 passed (freshness + pricing)
+- `/api/health` returns `{ db: 'ok', last_cron_run: null }` against local Supabase
+- `pnpm --filter web typecheck && pnpm --filter web lint` — clean
+- `next build` — exit 0, 27 routes (all dynamic/static as expected)
+- Footer (3-band CTA + Latest Dispatches + dark footer) ported verbatim
+  from `/demo/myellium.html` into `Shell.tsx` via `Footer.tsx`
+- Full CSS audit of `myellium.html` complete; all design tokens, utility
+  classes, and component styles present in `globals.css`
+
+---
+
+## Phase 8 — Dispatches Blog
+
+Free-form editorial layer backed by a `public.posts` table. Powers
+`/dispatches` (ISR list), `/dispatches/[slug]` (ISR detail), the
+footer "Latest Dispatches" live band, and a full admin CRUD console at
+`/console/dispatches`.
+
+### Cell 8.1 — `posts` Migration + RLS
+
+**What:** New `public.posts` table with slug, title, category, body,
+`published_at` (NULL = draft), and `moddatetime` trigger. RLS lets
+anon + authenticated read rows where `published_at IS NOT NULL AND
+published_at <= now()`. Service-role needed for writes.
+
+**Inputs:** Supabase local stack (Cell 1.3), moddatetime extension
+(Cell 1.6).
+
+**Outputs:** `supabase/migrations/20260501000004_posts.sql` applied;
+`packages/db/src/types.ts` regenerated to include `posts` table types.
+
+**Status:** `[x]`
+
+**Verification outcomes:**
+- Migration applied via `supabase migration up`.
+- `packages/db/src/types.ts` contains `posts` row/insert/update types.
+- Anon client can SELECT only published rows; service-role can INSERT/UPDATE/DELETE.
+
+---
+
+### Cell 8.2 — Server Actions + Slug Utility
+
+**What:** `apps/web/app/actions/dispatches.ts` — `'use server'` +
+`'server-only'`. Exports `createPost`, `updatePost`, `publishPost`,
+`unpublishPost`, `deletePost`. Zod validation; slug uniqueness returns
+user-friendly error (Postgres code `23505`). `revalidatePath` called
+for both storefront and console routes after every mutation.
+
+`apps/web/lib/slugify.ts` — pure URL-safe slug generator extracted to
+its own file because `'use server'` files can only export async
+functions.
+
+**Inputs:** Cell 8.1, `createAdminClient()` (service-role).
+
+**Outputs:** Five server actions; `lib/slugify.ts` utility.
+
+**Status:** `[x]`
+
+---
+
+### Cell 8.3 — Admin Console (`/console/dispatches`)
+
+**What:** Three pages under `app/(admin)/console/dispatches/`:
+
+| Route | File | Purpose |
+|---|---|---|
+| `/console/dispatches` | `page.tsx` | List all posts (published + draft) |
+| `/console/dispatches/new` | `new/page.tsx` | Create form — auto-slug, category select, markdown textarea |
+| `/console/dispatches/[id]` | `[id]/page.tsx` + `EditPostForm.tsx` | Edit, publish, unpublish, delete |
+
+All pages use `createAdminClient()` (service-role). List page is
+`force-dynamic`. New/edit forms are `'use client'` with auto-slug
+generation (manual-override flag).
+
+**Inputs:** Cell 8.2.
+
+**Outputs:** Full admin CRUD UX at `/console/dispatches`.
+
+**Status:** `[x]`
+
+---
+
+### Cell 8.4 — Storefront Pages (`/dispatches`, `/dispatches/[slug]`)
+
+**What:** ISR pages (`revalidate = 300`) using `createAnonClient()`.
+
+- `app/(storefront)/dispatches/page.tsx` — list of published posts,
+  newest first, rendered with `.fn-item` component classes.
+- `app/(storefront)/dispatches/[slug]/page.tsx` — detail page: meta
+  row (date + category), h1 title, dotted divider, markdown body.
+- `app/(storefront)/dispatches/MarkdownBody.tsx` — client component
+  that loads `react-markdown` via `next/dynamic({ ssr: false })` to
+  avoid webpack server-bundle failure (react-markdown v9 is ESM-only).
+- `@tailwindcss/typography` plugin added; `prose` classes applied to
+  markdown body.
+
+**Inputs:** Cell 8.1, Cell 8.2.
+
+**Outputs:** `/dispatches` and `/dispatches/[slug]` routes in the build.
+
+**Status:** `[x]`
+
+**Notes:**
+- `react-markdown` v9 is pure ESM. Static `import` in any file that
+  Next.js includes in the server bundle causes
+  `TypeError: __webpack_modules__[moduleId] is not a function`.
+  Fix: `dynamic(() => import('react-markdown'), { ssr: false })`.
+
+---
+
+### Cell 8.5 — Footer Live Data + Shell Wiring
+
+**What:** Root layout (`app/layout.tsx`) is made `async`; fetches
+the two most-recent published posts for the footer. Passes them down
+via `Shell` → `Footer` as `FooterDispatch[]`.
+
+Changes:
+- `Footer.tsx` — exports `FooterDispatch` type; accepts
+  `dispatches?: FooterDispatch[]` prop; falls back to static copy when
+  empty.
+- `Shell.tsx` — forwards `footerDispatches?: FooterDispatch[]` to
+  `Footer` via conditional spread (required by `exactOptionalPropertyTypes`).
+- `Sidebar.tsx` — "Dispatches" added to SECONDARY nav; sidebar and
+  topbar wordmarks ("Mycelium") now link to `/`.
+- `supabase/seed.sql` — two published demo posts added (idempotent
+  `ON CONFLICT DO UPDATE`).
+
+**Inputs:** Cells 8.1–8.4.
+
+**Outputs:** Footer "Latest Dispatches" band shows live posts; all
+wordmark links functional.
+
+**Status:** `[x]`
+
+**Verification outcomes:**
+- `next build` exit 0; routes `/dispatches`, `/dispatches/[slug]`,
+  `/console/dispatches`, `/console/dispatches/[id]`,
+  `/console/dispatches/new` all present.
+- Two seed posts visible at `/dispatches` and in footer.
+- Topbar + sidebar wordmarks navigate to `/`.
+
+---
+
+### Cell 8.6 — Verify Phase 8
+
+**What:** End-to-end check of the Dispatches blog.
+
+**Status:** `[x]`
+
+**Verification outcomes:**
+- `pnpm --filter web typecheck` — clean.
+- `pnpm --filter web build` — exit 0.
+- Seed posts reachable at `/dispatches/spring-lions-mane-yield-exceeds-forecast`
+  and `/dispatches/updated-coa-format-substrate-traceability`.
+- Admin can create, edit, publish, and delete posts via `/console/dispatches`.
+- Footer live band updates on ISR revalidation (300 s).
 
 ---
 
@@ -1825,6 +1992,12 @@ Monday, `last_cron_run` is stale → alert (manual for v1).
 | 7.2 | Sentry Wiring | Polish | `[ ]` |
 | 7.3 | Rate Limiting Middleware | Polish | `[x]` |
 | 7.4 | Health Check + Cron Monitoring | Polish | `[x]` |
-| 7.5 | Verify Phase 7 + Production Readiness | Polish | `[ ]` |
+| 7.5 | Verify Phase 7 + Production Readiness | Polish | `[x]` |
+| 8.1 | posts Migration + RLS | Dispatches | `[x]` |
+| 8.2 | Server Actions + Slug Utility | Dispatches | `[x]` |
+| 8.3 | Admin Console /console/dispatches | Dispatches | `[x]` |
+| 8.4 | Storefront Pages /dispatches | Dispatches | `[x]` |
+| 8.5 | Footer Live Data + Shell Wiring | Dispatches | `[x]` |
+| 8.6 | Verify Phase 8 | Dispatches | `[x]` |
 
-**Total: 44 cells across 7 phases**
+**Total: 50 cells across 8 phases**
