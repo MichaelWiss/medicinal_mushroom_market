@@ -5,6 +5,7 @@ import { Shell } from '@/components/shell/Shell';
 import { ToastProvider } from '@/components/ui/ToastProvider';
 import { CartProvider } from '@/components/cart/CartProvider';
 import { CartDrawer } from '@/components/cart/CartDrawer';
+import { PostHogProvider } from '@/components/analytics/PostHogProvider';
 
 const cormorant = Cormorant_Garamond({
   subsets: ['latin'],
@@ -35,12 +36,14 @@ export default function RootLayout({
   return (
     <html lang="en" className={`${cormorant.variable} ${jost.variable}`}>
       <body className="min-h-screen bg-putty text-ink font-sans font-light antialiased">
-        <ToastProvider>
-          <CartProvider>
-            <Shell>{children}</Shell>
-            <CartDrawer />
-          </CartProvider>
-        </ToastProvider>
+        <PostHogProvider>
+          <ToastProvider>
+            <CartProvider>
+              <Shell>{children}</Shell>
+              <CartDrawer />
+            </CartProvider>
+          </ToastProvider>
+        </PostHogProvider>
       </body>
     </html>
   );

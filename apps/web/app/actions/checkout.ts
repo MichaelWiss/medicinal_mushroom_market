@@ -29,6 +29,7 @@ import {
 import { createClient } from '@/lib/supabase/server';
 import { getStripe } from '@/lib/stripe/server';
 import { isDispatchAllowed } from '@/lib/checkout/dispatch';
+import { track } from '@/lib/posthog/track';
 
 const inputSchema = z.object({
   items: cartSchema,
@@ -288,6 +289,21 @@ export async function startCheckout(
     .from('orders')
     .update({ stripe_session_id: session.id })
     .eq('id', order.id);
+
+  // Analytics: a checkout has been initiated. The matching
+  // `checkout_completed` event lands in the Stripe webhook (Cell 3.4)
+  // once the session resolves.
+  track(
+    'checkout_started',
+    user.id,
+    {
+      orderId: order.id,
+      paymentMethod: 'card',
+      totalPence: totalPrice,
+      lineItemCount: items.length,
+    },
+    { companyId },
+  );
 
   revalidatePath('/orders');
 

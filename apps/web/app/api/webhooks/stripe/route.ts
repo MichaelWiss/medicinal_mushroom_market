@@ -37,6 +37,7 @@ import {
   sendBackorderNotice,
   sendOrderConfirmation,
 } from '@/lib/email/send';
+import { track, flushPostHog } from '@/lib/posthog/track';
 
 // Force the Node.js runtime — the Stripe SDK relies on Node crypto for
 // signature verification and `stream` APIs not available on the Edge
@@ -83,9 +84,11 @@ export async function POST(request: Request): Promise<Response> {
     // Surface handler errors so Stripe retries delivery, but log loudly.
     const msg = err instanceof Error ? err.message : 'unknown error';
     console.error(`[stripe-webhook] handler error for ${event.type}:`, msg);
+    await flushPostHog();
     return new NextResponse(`Handler error: ${msg}`, { status: 500 });
   }
 
+  await flushPostHog();
   return NextResponse.json({ received: true });
 }
 
@@ -184,6 +187,22 @@ async function handleCheckoutCompleted(
         itemId: a.itemId,
         updErr,
       });
+      continue;
+    }
+    const row = items.find((i) => i.id === a.itemId);
+    if (row) {
+      track(
+        'batch_allocated',
+        orderId,
+        {
+          orderId,
+          orderItemId: a.itemId,
+          speciesId: row.species_id,
+          batchId: a.batchId,
+          quantity: row.quantity,
+        },
+        { companyId: order.company_id },
+      );
     }
   }
 
@@ -195,6 +214,20 @@ async function handleCheckoutCompleted(
       orderId,
       failedItems: failed.map((f) => f.itemId),
     });
+    for (const f of failed) {
+      const row = items.find((i) => i.id === f.itemId);
+      if (!row) continue;
+      track(
+        'backorder_triggered',
+        orderId,
+        {
+          orderId,
+          speciesId: row.species_id,
+          quantity: row.quantity,
+        },
+        { companyId: order.company_id },
+      );
+    }
     const failedSpecies = failed
       .map((f) => items.find((i) => i.id === f.itemId))
       .map((row) => {
@@ -233,6 +266,19 @@ async function handleCheckoutCompleted(
     });
     return;
   }
+
+  // Funnel: order has been fully paid + allocated.
+  track(
+    'checkout_completed',
+    orderId,
+    {
+      orderId,
+      paymentMethod: 'card',
+      totalPence: order.total_price,
+      lineItemCount: items.length,
+    },
+    { companyId: order.company_id },
+  );
 
   // Order is fully allocated and confirmed — send order-confirmation
   // mail to every buyer associated with the company.

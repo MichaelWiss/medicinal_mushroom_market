@@ -35,6 +35,7 @@ import { isDispatchAllowed } from '@/lib/checkout/dispatch';
 import { InvoicePdf, type InvoiceLine } from '@/lib/invoices/InvoicePdf';
 import { sendInvoice } from '@/lib/email/send';
 import { orderUrl as buildOrderUrl } from '@/lib/email/send';
+import { track } from '@/lib/posthog/track';
 
 const inputSchema = z.object({
   items: cartSchema,
@@ -292,6 +293,29 @@ export async function startNet30Checkout(
   }
 
   revalidatePath('/orders');
+  // Net-30 confirms inline (no Stripe round-trip), so emit both events.
+  track(
+    'checkout_started',
+    user.id,
+    {
+      orderId: order.id,
+      paymentMethod: 'net30',
+      totalPence: totalPrice,
+      lineItemCount: invoiceLines.length,
+    },
+    { companyId },
+  );
+  track(
+    'checkout_completed',
+    user.id,
+    {
+      orderId: order.id,
+      paymentMethod: 'net30',
+      totalPence: totalPrice,
+      lineItemCount: invoiceLines.length,
+    },
+    { companyId },
+  );
   return { ok: true, orderId: order.id, invoiceNumber };
 }
 

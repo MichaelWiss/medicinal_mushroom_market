@@ -333,6 +333,16 @@ async function runEngine(): Promise<RunSummary> {
     }
   }
 
+  // Record completion time so /api/health can surface last_cron_run.
+  const runTimestamp = new Date().toISOString();
+  await supabase
+    .from('system_metrics')
+    .upsert(
+      { key: 'last_cron_run', value: runTimestamp, updated_at: runTimestamp },
+      { onConflict: 'key' },
+    );
+  console.log('[engine] logged last_cron_run', runTimestamp);
+
   return summary;
 }
 

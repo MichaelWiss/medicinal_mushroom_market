@@ -21,6 +21,7 @@ import {
   setStripeSubscriptionQuantity,
 } from '@/lib/stripe/subscriptions';
 import { presentationFor } from '@/lib/data/species-presentation';
+import { track } from '@/lib/posthog/track';
 import type { CompanyTier } from '@repo/shared';
 
 // ── shared auth/company resolution ─────────────────────────────
@@ -148,6 +149,17 @@ export async function createSubscription(
   }
 
   revalidatePath('/subscriptions');
+  track(
+    'subscription_created',
+    ctx.userId,
+    {
+      subscriptionId: row.id,
+      speciesId: input.speciesId,
+      frequency: input.frequency,
+      quantity: input.quantity,
+    },
+    { companyId: ctx.companyId },
+  );
   return { ok: true, id: row.id };
 }
 

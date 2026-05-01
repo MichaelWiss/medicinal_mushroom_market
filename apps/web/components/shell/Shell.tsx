@@ -4,6 +4,7 @@ import { useState, type ReactNode } from 'react';
 import { usePathname } from 'next/navigation';
 import { Sidebar } from './Sidebar';
 import { Topbar } from './Topbar';
+import { Footer } from './Footer';
 import { StorefrontTopbarRight } from '@/components/cart/StorefrontTopbarRight';
 
 // Routes that should show the storefront topbar (cart, quote CTA).
@@ -62,7 +63,10 @@ export function Shell({
       />
       <div className="flex min-w-0 flex-col">
         <Topbar title={title} right={right} />
-        <div className="flex-1 overflow-y-auto">{children}</div>
+        <div className="flex-1 overflow-y-auto">
+          {children}
+          <Footer />
+        </div>
       </div>
     </div>
   );
