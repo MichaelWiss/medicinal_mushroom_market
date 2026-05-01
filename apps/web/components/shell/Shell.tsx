@@ -4,7 +4,7 @@ import { useState, type ReactNode } from 'react';
 import { usePathname } from 'next/navigation';
 import { Sidebar } from './Sidebar';
 import { Topbar } from './Topbar';
-import { Footer } from './Footer';
+import { Footer, type FooterDispatch } from './Footer';
 import { StorefrontTopbarRight } from '@/components/cart/StorefrontTopbarRight';
 
 // Routes that should show the storefront topbar (cart, quote CTA).
@@ -35,10 +35,12 @@ function titleForPath(pathname: string): string {
 export function Shell({
   topbarTitle,
   topbarRight,
+  footerDispatches,
   children,
 }: {
   topbarTitle?: string;
   topbarRight?: ReactNode;
+  footerDispatches?: FooterDispatch[];
   children: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
@@ -65,7 +67,7 @@ export function Shell({
         <Topbar title={title} right={right} />
         <div className="flex-1 overflow-y-auto">
           {children}
-          <Footer />
+          <Footer {...(footerDispatches ? { dispatches: footerDispatches } : {})} />
         </div>
       </div>
     </div>

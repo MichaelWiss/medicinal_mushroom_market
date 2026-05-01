@@ -545,3 +545,55 @@ update public.batches set available_units = available_units - 10
   where id = 'ba000028-0000-0000-0000-000000000001';
 update public.batches set available_units = available_units - 20
   where id = 'ba000029-0000-0000-0000-000000000001';
+
+-- ─────────────────────────────────────────────────────────────
+-- Dispatches blog seed (two example published posts).
+-- These power /dispatches and the footer "Latest dispatches" band
+-- so the demo links work out of the box.
+-- ─────────────────────────────────────────────────────────────
+insert into public.posts (slug, title, category, body, published_at) values
+(
+  'spring-lions-mane-yield-exceeds-forecast',
+  'Spring Lion''s Mane yield exceeds forecast',
+  'Harvest report',
+  $md$Our spring flush of *Hericium erinaceus* (BCH-2026-044) finished 18% above forecast.
+
+## What this means for buyers
+
+- **Immediate availability**: 2,400 units are ready for Monday dispatch.
+- **Lead time**: Confirmed orders placed by Friday 17:00 BST will ship the following Monday.
+- **CoA on file**: Substrate lot, contamination check, and third-party potency assay all pass.
+
+We expect this surplus to last roughly four weeks before the inventory normalises against subscription draw-down. Bulk buyers should lock in via the [bulk quote tool](/quotes) before mid-May.
+
+## Substrate notes
+
+The hardwood-blend substrate (oak/beech, 60/40) outperformed the all-oak control in fruiting density by a comfortable margin — we will be transitioning all Q3 batches to this blend.
+$md$,
+  '2026-04-22T09:00:00Z'
+),
+(
+  'updated-coa-format-substrate-traceability',
+  'Updated CoA format includes substrate lot traceability',
+  'Compliance',
+  $md$All Certificates of Analysis issued from May 2026 onwards now include:
+
+1. **Substrate lot ID** — traceable back to the supplier and inoculation date.
+2. **Third-party lab verification** — independent potency and contamination assay alongside our in-house results.
+3. **Cold-chain attestation** — temperature log digest from harvest through dispatch.
+
+This change brings our documentation in line with the upcoming **EU FSVO 2026** guidance and the **SALSA Plus** audit framework.
+
+## Action required for existing customers
+
+None — the new format is a strict superset of the previous one. Older CoAs remain valid; no re-issuance is needed.
+
+For questions, reply directly to your account manager or email **compliance@myceliumco.com**.
+$md$,
+  '2026-04-18T14:30:00Z'
+)
+on conflict (slug) do update set
+  title = excluded.title,
+  category = excluded.category,
+  body = excluded.body,
+  published_at = excluded.published_at;

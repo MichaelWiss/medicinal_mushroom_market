@@ -6,6 +6,8 @@ import { ToastProvider } from '@/components/ui/ToastProvider';
 import { CartProvider } from '@/components/cart/CartProvider';
 import { CartDrawer } from '@/components/cart/CartDrawer';
 import { PostHogProvider } from '@/components/analytics/PostHogProvider';
+import { createAnonClient } from '@/lib/supabase/anon';
+import type { FooterDispatch } from '@/components/shell/Footer';
 
 const cormorant = Cormorant_Garamond({
   subsets: ['latin'],
@@ -28,18 +30,34 @@ export const metadata: Metadata = {
     'Inoculation-dated, contamination-checked, cold-chain certified spawn and extract for B2B buyers.',
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  // Fetch latest 2 published posts for the footer "Latest dispatches" band.
+  // Uses the anon client so it respects the public RLS policy.
+  // Errors are silently swallowed — Footer falls back to static content.
+  let footerDispatches: FooterDispatch[] | undefined;
+  try {
+    const supabase = createAnonClient();
+    const { data } = await supabase
+      .from('posts')
+      .select('slug, title, category, published_at')
+      .order('published_at', { ascending: false })
+      .limit(2);
+    if (data?.length) footerDispatches = data as FooterDispatch[];
+  } catch {
+    // silently fall back to static content
+  }
+
   return (
     <html lang="en" className={`${cormorant.variable} ${jost.variable}`}>
       <body className="min-h-screen bg-putty text-ink font-sans font-light antialiased">
         <PostHogProvider>
           <ToastProvider>
             <CartProvider>
-              <Shell>{children}</Shell>
+              <Shell {...(footerDispatches ? { footerDispatches } : {})}>{children}</Shell>
               <CartDrawer />
             </CartProvider>
           </ToastProvider>

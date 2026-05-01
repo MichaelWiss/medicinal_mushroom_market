@@ -4,35 +4,50 @@ import type { Route } from 'next';
 // Footer — ported verbatim from /demo/myellium.html lines 727–807.
 // Three bands:
 //   1. Mauve CTA  (.footer-cta)
-//   2. Latest dispatches  (.footer-news)
+//   2. Latest dispatches  (.footer-news)  — live from Supabase via layout
 //   3. Dark footer  (.footer-dark)
 // All CSS classes live in globals.css under @layer components.
 
+export type FooterDispatch = {
+  slug: string;
+  title: string;
+  category: string;
+  published_at: string;
+};
+
 const NAV_LINKS: { label: string; href: Route }[] = [
   { label: 'Species catalogue', href: '/' as Route },
+  { label: 'Dispatches', href: '/dispatches' as Route },
   { label: 'Subscriptions', href: '/subscriptions' as Route },
   { label: 'Order history', href: '/orders' as Route },
-  { label: 'Batch traceability', href: '/traceability' as Route },
   { label: 'Bulk quotes', href: '/quotes' as Route },
 ];
 
-const DISPATCH_ITEMS = [
+const fmtDate = (iso: string) =>
+  new Date(iso).toLocaleDateString('en-GB', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  });
+
+// Static fallback shown before any posts are published.
+const FALLBACK_DISPATCHES: FooterDispatch[] = [
   {
-    date: '22 Apr 2026',
-    category: 'Harvest report',
+    slug: '',
     title: "Spring Lion's Mane yield exceeds forecast — BCH-2026-044 now available for immediate dispatch",
-    linkLabel: 'Read the report',
+    category: 'Harvest report',
+    published_at: '2026-04-22T00:00:00Z',
   },
   {
-    date: '18 Apr 2026',
+    slug: '',
+    title: 'Updated CoA format now includes substrate lot traceability and third-party lab verification',
     category: 'Compliance',
-    title:
-      'Updated CoA format now includes substrate lot traceability and third-party lab verification',
-    linkLabel: 'Read more',
+    published_at: '2026-04-18T00:00:00Z',
   },
 ];
 
-export function Footer() {
+export function Footer({ dispatches }: { dispatches?: FooterDispatch[] }) {
+  const items = dispatches?.length ? dispatches : FALLBACK_DISPATCHES;
   return (
     <footer>
       {/* ── 1. MAUVE CTA BAND ── */}
@@ -73,15 +88,21 @@ export function Footer() {
       <div className="footer-news">
         <div className="fn-heading">Latest dispatches</div>
         <div className="fn-grid">
-          {DISPATCH_ITEMS.map((item) => (
-            <div key={item.date} className="fn-item">
+          {items.map((item) => (
+            <div key={item.published_at + item.slug} className="fn-item">
               <div className="fn-meta">
-                {item.date} <span>&#9632;</span> {item.category}
+                {fmtDate(item.published_at)} <span>&#9632;</span> {item.category}
               </div>
               <div className="fn-title">{item.title}</div>
-              <span className="fn-link">
-                {item.linkLabel} &nbsp;&rarr;
-              </span>
+              {item.slug ? (
+                <Link href={`/dispatches/${item.slug}` as Route} className="fn-link">
+                  Read more &nbsp;&rarr;
+                </Link>
+              ) : (
+                <Link href={'/dispatches' as Route} className="fn-link">
+                  Read more &nbsp;&rarr;
+                </Link>
+              )}
             </div>
           ))}
         </div>
@@ -120,15 +141,20 @@ export function Footer() {
             <Link href="/sign-in" className="fd-contact-link">
               Account manager <span>&#8599;</span>
             </Link>
-            <span className="fd-contact-link">
+            <a href="mailto:lab@myceliumco.com" className="fd-contact-link">
               Lab support <span>&#8599;</span>
-            </span>
-            <span className="fd-contact-link">
+            </a>
+            <a
+              href="https://linkedin.com/company/myceliumco"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="fd-contact-link"
+            >
               LinkedIn <span>&#8599;</span>
-            </span>
-            <span className="fd-contact-link">
+            </a>
+            <Link href="/traceability" className="fd-contact-link">
               Compliance docs <span>&#8599;</span>
-            </span>
+            </Link>
           </div>
         </div>
 

@@ -1,4 +1,5 @@
 import type { Config } from 'tailwindcss';
+import typography from '@tailwindcss/typography';
 
 // Design tokens ported from /demo/myellium.html.
 // Colors are exact hex; fonts loaded via next/font (see app/layout.tsx).
@@ -41,7 +42,7 @@ const config: Config = {
       },
     },
   },
-  plugins: [],
+  plugins: [typography],
 };
 
 export default config;

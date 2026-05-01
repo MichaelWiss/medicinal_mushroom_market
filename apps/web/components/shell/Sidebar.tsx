@@ -13,6 +13,7 @@ const PRIMARY: NavItem[] = [
 ];
 
 const SECONDARY: NavItem[] = [
+  { label: 'Dispatches', href: '/dispatches' as Route },
   { label: 'Orders', href: '/orders' as Route },
   { label: 'Traceability', href: '/traceability' as Route },
   { label: 'Bulk quotes', href: '/quotes' as Route, small: true },
@@ -64,9 +65,13 @@ export function Sidebar({
           }}
         >
           <div className="px-9 pb-7 pt-9 border-b-[3px] border-dotted border-white/15">
-            <div className="font-serif text-[20px] font-light leading-[1.1] text-white/90">
+            <Link
+              href={'/' as Route}
+              onClick={handleNavClick}
+              className="block font-serif text-[20px] font-light leading-[1.1] text-white/90 transition-colors hover:text-white"
+            >
               Mycelium <i className="not-italic font-light italic text-yellow">Supply Co.</i>
-            </div>
+            </Link>
             <div className="mt-1.5 text-[9px] font-normal uppercase tracking-wider5 text-white/30">
               B2B Spawn &amp; Extract
             </div>

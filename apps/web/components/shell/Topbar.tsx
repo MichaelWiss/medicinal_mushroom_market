@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import Link from 'next/link';
 
 export function Topbar({
   title,
@@ -9,9 +10,12 @@ export function Topbar({
 }) {
   return (
     <header className="sticky top-0 z-20 flex h-14 items-stretch justify-between border-b-[3px] border-dotted border-[color:var(--dot)] bg-putty">
-      <div className="flex items-center border-r-[3px] border-dotted border-[color:var(--dot)] px-9 font-serif text-[15px] font-light italic tracking-wide text-ink2">
+      <Link
+        href="/"
+        className="flex items-center border-r-[3px] border-dotted border-[color:var(--dot)] px-9 font-serif text-[15px] font-light italic tracking-wide text-ink2 transition-colors hover:text-ink"
+      >
         {title}
-      </div>
+      </Link>
       {right ? <div className="flex items-stretch">{right}</div> : null}
     </header>
   );
