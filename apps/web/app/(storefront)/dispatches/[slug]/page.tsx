@@ -3,11 +3,46 @@
 
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
+import type { Metadata } from 'next';
 import type { Route } from 'next';
 import { createAnonClient } from '@/lib/supabase/anon';
 import { MarkdownBody } from '../MarkdownBody';
 
 export const revalidate = 300;
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ slug: string }>;
+}): Promise<Metadata> {
+  const { slug } = await params;
+  const { data: post } = await createAnonClient()
+    .from('posts')
+    .select('title, category, body, published_at')
+    .eq('slug', slug)
+    .single();
+
+  if (!post) return {};
+
+  // First 160 chars of body text (strip markdown syntax for the description).
+  const description = post.body
+    .replace(/[#*_`\[\]>!\-]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 160);
+
+  return {
+    title: `${post.title} — Mycelium Supply Co.`,
+    description,
+    openGraph: {
+      title: post.title,
+      description,
+      type: 'article',
+      publishedTime: post.published_at ?? undefined,
+      tags: [post.category],
+    },
+  };
+}
 
 const fmtDate = (iso: string) =>
   new Date(iso).toLocaleDateString('en-GB', {
