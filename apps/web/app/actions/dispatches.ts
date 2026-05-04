@@ -3,12 +3,31 @@
 import 'server-only';
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
+import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 
 // ── Shared result type ────────────────────────────────────────
 export type ActionResult<T = void> =
   | { ok: true; data: T }
   | { ok: false; error: string };
+
+// ── Auth guard ────────────────────────────────────────────────
+// Server Actions are POST endpoints; without this guard anyone on
+// the internet could call createPost / publishPost / deletePost.
+// Mirrors the `requireSignedInOps` pattern in actions/dispatch.ts
+// and actions/batches.ts. Promotion to a real ops-role check is
+// tracked separately.
+async function requireSignedInOps(): Promise<
+  | { ok: true; userId: string }
+  | { ok: false; error: string }
+> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: 'Sign in required.' };
+  return { ok: true, userId: user.id };
+}
 
 // ── Input schemas ─────────────────────────────────────────────
 const postSchema = z.object({
@@ -31,6 +50,9 @@ const publishSchema = z.object({
 export async function createPost(
   formData: FormData,
 ): Promise<ActionResult<{ id: string; slug: string }>> {
+  const guard = await requireSignedInOps();
+  if (!guard.ok) return { ok: false, error: guard.error };
+
   const raw = {
     title: formData.get('title'),
     slug: formData.get('slug'),
@@ -65,6 +87,9 @@ export async function updatePost(
   id: string,
   formData: FormData,
 ): Promise<ActionResult> {
+  const guard = await requireSignedInOps();
+  if (!guard.ok) return { ok: false, error: guard.error };
+
   const raw = {
     title: formData.get('title'),
     slug: formData.get('slug'),
@@ -97,6 +122,9 @@ export async function updatePost(
 
 // ── publishPost ───────────────────────────────────────────────
 export async function publishPost(id: string): Promise<ActionResult> {
+  const guard = await requireSignedInOps();
+  if (!guard.ok) return { ok: false, error: guard.error };
+
   const parsed = publishSchema.safeParse({ id });
   if (!parsed.success) return { ok: false, error: 'Invalid post ID.' };
 
@@ -124,6 +152,9 @@ export async function publishPost(id: string): Promise<ActionResult> {
 
 // ── unpublishPost ─────────────────────────────────────────────
 export async function unpublishPost(id: string): Promise<ActionResult> {
+  const guard = await requireSignedInOps();
+  if (!guard.ok) return { ok: false, error: guard.error };
+
   const parsed = publishSchema.safeParse({ id });
   if (!parsed.success) return { ok: false, error: 'Invalid post ID.' };
 
@@ -142,6 +173,9 @@ export async function unpublishPost(id: string): Promise<ActionResult> {
 
 // ── deletePost ────────────────────────────────────────────────
 export async function deletePost(id: string): Promise<ActionResult> {
+  const guard = await requireSignedInOps();
+  if (!guard.ok) return { ok: false, error: guard.error };
+
   const parsed = publishSchema.safeParse({ id });
   if (!parsed.success) return { ok: false, error: 'Invalid post ID.' };
 
