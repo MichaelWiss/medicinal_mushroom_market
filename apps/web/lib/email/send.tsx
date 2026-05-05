@@ -8,6 +8,7 @@
 import 'server-only';
 import { render } from '@react-email/render';
 import * as React from 'react';
+import { getSiteUrl } from '@/lib/auth/origin';
 import { getEmailClient, type EmailSendResult } from './client';
 import {
   BackorderEmail,
@@ -22,10 +23,9 @@ import {
   type QuoteProps,
 } from './templates';
 
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'http://localhost:3000';
 
 export function orderUrl(orderId: string): string {
-  return `${SITE_URL.replace(/\/$/, '')}/orders/${orderId}`;
+  return `${getSiteUrl()}/orders/${orderId}`;
 }
 
 async function dispatchSend(

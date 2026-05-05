@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
 import type { Database } from '@repo/db';
+import { resolveSiteOrigin, UntrustedOriginError } from '@/lib/auth/origin';
 
 // Magic-link / OAuth PKCE callback. Supabase redirects here with ?code=...
 // after the user clicks the link in their email. We exchange the code for
@@ -11,16 +12,20 @@ import type { Database } from '@repo/db';
 // are lost when we return the redirect.
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
-  // IMPORTANT: derive origin from the actual Host header rather than
-  // request.url. Next dev-server normalizes request.url to "localhost",
-  // which would set auth cookies on a different host than the user is
-  // browsing (e.g. 127.0.0.1) and silently lose the session.
-  const host =
-    request.headers.get('x-forwarded-host') ?? request.headers.get('host');
-  const proto =
-    request.headers.get('x-forwarded-proto') ??
-    (request.url.startsWith('https') ? 'https' : 'http');
-  const origin = host ? `${proto}://${host}` : new URL(request.url).origin;
+  // Origin must come from a trusted source so a poisoned Host header
+  // cannot redirect the magic-link exchange to an attacker domain. The
+  // resolver requires NEXT_PUBLIC_SITE_URL in production and falls
+  // back to a small dev allow-list otherwise.
+  let origin: string;
+  try {
+    origin = resolveSiteOrigin(request);
+  } catch (err) {
+    if (err instanceof UntrustedOriginError) {
+      console.error('[auth/callback]', err.message);
+      return new NextResponse('Site origin not configured', { status: 500 });
+    }
+    throw err;
+  }
   const code = searchParams.get('code');
   const next = sanitizeNext(searchParams.get('next'));
 

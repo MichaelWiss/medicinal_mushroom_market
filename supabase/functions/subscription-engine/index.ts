@@ -28,15 +28,17 @@
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.4';
 
-// ── env ──────────────────────────────────────────────────────
+// ── env ─────────────────────────────────────────────────
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY') ?? '';
 const EMAIL_FROM = Deno.env.get('EMAIL_FROM') ?? 'Mycelium <onboarding@resend.dev>';
 const SITE_URL = Deno.env.get('SITE_URL') ?? 'http://localhost:3000';
-// Shared secret expected in the Authorization header. Defaults to the
-// service-role key, which is what Supabase scheduled invocations send.
-const ENGINE_SECRET = Deno.env.get('SUBSCRIPTION_ENGINE_SECRET') ?? SERVICE_ROLE_KEY;
+// Shared secret expected in the Authorization header. Must be set
+// explicitly; we no longer fall back to the service-role key so a
+// compromised cron caller cannot hand-roll service-role access just by
+// guessing that the engine reuses the same value.
+const ENGINE_SECRET = Deno.env.get('SUBSCRIPTION_ENGINE_SECRET') ?? '';
 
 // ── types ────────────────────────────────────────────────────
 type Frequency = 'weekly' | 'biweekly' | 'monthly';
@@ -61,7 +63,21 @@ type RunSummary = {
   errors: { subscriptionId: string; message: string }[];
 };
 
-// ── helpers ──────────────────────────────────────────────────
+// ── helpers ────────────────────────────────────────────────
+
+/**
+ * Constant-time string comparison. Deno does not ship
+ * `crypto.timingSafeEqual`, so we compare via a length-checked XOR loop
+ * to avoid leaking the secret length / prefix through response timing.
+ */
+function timingSafeEqualString(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let mismatch = 0;
+  for (let i = 0; i < a.length; i++) {
+    mismatch |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+  return mismatch === 0;
+}
 
 /** Today's date in UTC as YYYY-MM-DD. */
 function todayUTC(): string {
@@ -352,9 +368,15 @@ Deno.serve(async (req) => {
   if (req.method !== 'POST') {
     return new Response('Method Not Allowed', { status: 405 });
   }
+  if (!ENGINE_SECRET) {
+    // Fail loudly when the operator has not configured a shared secret.
+    // We intentionally do NOT fall back to the service-role key here.
+    console.error('[engine] SUBSCRIPTION_ENGINE_SECRET is not set');
+    return new Response('Engine secret not configured', { status: 503 });
+  }
   const auth = req.headers.get('authorization') ?? '';
   const expected = `Bearer ${ENGINE_SECRET}`;
-  if (auth !== expected) {
+  if (!timingSafeEqualString(auth, expected)) {
     return new Response('Unauthorized', { status: 401 });
   }
 

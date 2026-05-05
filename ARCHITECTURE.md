@@ -269,6 +269,7 @@ Implemented in `packages/shared/pricing.ts` — pure functions, fully unit-teste
 medicinal_mushroom_market/
 ├── ARCHITECTURE.md             This file
 ├── BUILD_PLAN.md               Cellular build plan
+├── SECURITY.md                 Audit summary, fixes, deploy checklist
 ├── TESTING.md                  Testing strategy
 ├── Project.md                  Project context & decisions
 ├── README.md                   Public-facing readme
@@ -316,24 +317,47 @@ medicinal_mushroom_market/
 
 ## Security
 
+For the full audit summary, the list of fixes (steps 1–9), validation
+commands, and the production deploy checklist, see
+[`SECURITY.md`](./SECURITY.md). The bullets below capture the
+high-level model only.
+
 - **Authentication**: Supabase Auth, magic-link only. No passwords.
+  Self-signup is disabled; users are added exclusively via the admin
+  invite flow.
 - **Authorization**: RLS on every table. JWT custom claim `company_id`
   injected by Supabase Auth hook; policies use `auth.jwt() ->> 'company_id'`
-  for O(1) lookup instead of subquery.
+  for O(1) lookup instead of subquery. Ops-only routes and Server
+  Actions are gated by an allow-list table (`public.ops_users`) via the
+  `requireOps()` helper.
 - **Service role key**: Server-side only. Never imported by any file under
   `app/(storefront)/` or `app/(dashboard)/`. ESLint rule enforces this.
+- **Pricing integrity**: Cart `unitPrice` and `speciesName` from the
+  client are dropped at the server boundary; trusted values are
+  re-derived from the DB row + presentation map by
+  `lib/checkout/pricing.ts`.
 - **Webhook verification**: Stripe and Shippo webhook signatures verified
   before any DB write. Invalid signature → 401, no state change.
+  Subscription-engine bearer compared in constant time against a
+  dedicated `SUBSCRIPTION_ENGINE_SECRET` (no service-role key fallback).
 - **CoA access**: Supabase Storage signed URLs, regenerated per request,
   10-minute expiry. RLS check confirms the requesting user's company has an
   order containing an item with that `batch_id`.
 - **Net-30 enforcement**: DB trigger, not application logic. Cannot be
   bypassed by a malicious client even with a valid JWT.
 - **Rate limiting**: Vercel Edge middleware on `/api/webhooks/*` and
-  Server Actions for cart/checkout. 10 req/min per IP for unauthenticated;
-  60 req/min per user for authenticated.
+  `/api/invites`. 10 req/min per IP for unauthenticated; 60 req/min
+  per user for authenticated. Production fails closed if Upstash
+  credentials are missing.
+- **Origin trust**: Magic-link redirects, Stripe success/cancel URLs,
+  invite emails, and team-invite UI use `lib/auth/origin.ts`, which
+  requires `NEXT_PUBLIC_SITE_URL` in production rather than trusting
+  inbound `Host` headers.
+- **HTTP security headers**: HSTS, X-Content-Type-Options,
+  Referrer-Policy, Permissions-Policy, X-Frame-Options DENY, plus a
+  Report-Only CSP shipped from `next.config.mjs`.
 - **Secret handling**: All secrets via Vercel + Supabase env vars; never
-  committed. `.env.example` lists names only.
+  committed. `.env.local.example` lists names only.
 
 ---
 
@@ -375,6 +399,9 @@ Developer machine                  Production
   on `supabase functions deploy`.
 - **Secrets**: Vercel env vars (production) + Supabase project env (Edge
   Functions). `.env.local` for dev.
+- **Pre-deploy checklist**: see [`SECURITY.md#deploy-checklist`](./SECURITY.md#deploy-checklist)
+  for the required env vars, Postgres GUCs, hosted Supabase auth
+  settings, ops-user seeding, and CSP enforce-mode handover.
 
 ---
 

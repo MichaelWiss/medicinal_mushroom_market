@@ -11,6 +11,7 @@
 
 import 'server-only';
 import { createClient } from '@/lib/supabase/server';
+import { orderRef as buildOrderRef, batchRef as buildBatchRef } from '@/lib/format/refs';
 import {
   daysSinceInoculation,
   daysUntilExpiry,
@@ -69,7 +70,7 @@ export type OrderTrace = {
   items: TraceItem[];
 };
 
-const shortRef = (uuid: string) => uuid.slice(0, 8).toUpperCase();
+// (legacy local helpers replaced by `lib/format/refs`)
 
 /**
  * Lists the signed-in company's orders for the index page. RLS filters by
@@ -93,7 +94,7 @@ export async function loadOrderIndex(): Promise<OrderIndexRow[] | null> {
 
   return (data ?? []).map((o) => ({
     id: o.id,
-    shortRef: `MYC-${shortRef(o.id)}`,
+    shortRef: buildOrderRef(o.id),
     status: o.status,
     paymentMethod: o.payment_method,
     dispatchDate: o.dispatch_date,
@@ -162,7 +163,7 @@ export async function loadTraceability(
         const { coaUrl, coaError } = await signCoaUrl(supabase, batch.id);
         traceBatch = {
           id: batch.id,
-          shortRef: `BCH-${shortRef(batch.id)}`,
+          shortRef: buildBatchRef(batch.id),
           inoculationDate: batch.inoculation_date,
           harvestDate: batch.harvest_date,
           substrateLot: batch.substrate_lot,
@@ -202,7 +203,7 @@ export async function loadTraceability(
 
   return {
     id: order.id,
-    shortRef: `MYC-${shortRef(order.id)}`,
+    shortRef: buildOrderRef(order.id),
     status: order.status,
     paymentMethod: order.payment_method,
     dispatchDate: order.dispatch_date,

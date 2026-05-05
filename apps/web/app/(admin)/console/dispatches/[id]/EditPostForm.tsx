@@ -8,7 +8,7 @@ import {
   publishPost,
   unpublishPost,
   deletePost,
-} from '@/app/actions/dispatches';
+} from '@/app/actions/posts';
 import { slugify } from '@/lib/slugify';
 
 const CATEGORIES = ['Harvest report', 'Compliance', 'Supply update', 'Announcement', 'Update'];

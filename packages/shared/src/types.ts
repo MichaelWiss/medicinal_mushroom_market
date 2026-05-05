@@ -61,15 +61,15 @@ export interface QuoteLineItem {
   note?:      string;
 }
 
-/**
- * Typed shipping address stored in `companies.shipping_address` (jsonb).
- * Must be kept in sync with the seed's JSON shape.
- */
+/** Normalized shipping address used internally after parsing company JSON. */
 export interface ShippingAddress {
-  line1:    string;
-  line2?:   string;
+  name?:    string;
+  street1:  string;
+  street2?: string;
   city:     string;
-  state:    string;
-  postcode: string;
+  state?:   string;
+  zip?:     string;
   country:  string;
+  phone?:   string;
+  email?:   string;
 }

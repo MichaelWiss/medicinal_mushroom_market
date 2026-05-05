@@ -5,7 +5,7 @@
 
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { createPost } from '@/app/actions/dispatches';
+import { createPost } from '@/app/actions/posts';
 import { slugify } from '@/lib/slugify';
 
 const CATEGORIES = ['Harvest report', 'Compliance', 'Supply update', 'Announcement', 'Update'];

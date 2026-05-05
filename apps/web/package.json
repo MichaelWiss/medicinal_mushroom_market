@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
     "traceability:seed-coa": "pnpm dlx tsx --env-file=.env.local scripts/seed-coa.ts"
   },
   "dependencies": {
@@ -42,6 +43,7 @@
     "eslint-config-next": "^15.1.0",
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.17",
-    "typescript": "*"
+    "typescript": "*",
+    "vitest": "^4.1.5"
   }
 }

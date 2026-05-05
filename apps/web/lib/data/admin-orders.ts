@@ -8,18 +8,17 @@
 
 import 'server-only';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { FMT, type FormatKey } from '@/lib/data/species';
+import { formatLabel } from '@/lib/data/labels';
+import { mapOrderItems, type RawOrderItem } from '@/lib/data/order-items';
+import { parseShippingAddress } from '@/lib/data/shipping-address';
+import { orderRef as buildOrderRef } from '@/lib/format/refs';
 import type {
   OrderDetail,
   OrderHistoryRow,
-  OrderItem,
   OrderStatus,
   PaymentMethod,
 } from '@/lib/data/orders';
-
-const shortRef = (uuid: string) => `MYC-${uuid.slice(0, 8).toUpperCase()}`;
-const formatLabelFor = (key: string): string =>
-  (FMT as Record<string, string>)[key] ?? key;
+import type { ShippingAddress } from '@repo/shared';
 
 export type AdminOrderRow = OrderHistoryRow & {
   companyId: string;
@@ -32,17 +31,6 @@ export type AdminOrderDetail = OrderDetail & {
   shippingAddress: ShippingAddress | null;
 };
 
-export type ShippingAddress = {
-  name?: string;
-  street1?: string;
-  street2?: string;
-  city?: string;
-  state?: string;
-  zip?: string;
-  country?: string;
-  phone?: string;
-  email?: string;
-};
 
 export async function loadAdminOrders(filter?: {
   status?: OrderStatus;
@@ -83,19 +71,19 @@ export async function loadAdminOrders(filter?: {
           .join(', ')
       : '—';
     const formats = [...new Set(items.map((it) => it.format))];
-    const formatLabel =
+    const lineFormatLabel =
       formats.length === 1
-        ? formatLabelFor(formats[0]!)
+        ? formatLabel(formats[0]!)
         : items.length > 0
           ? 'Mixed'
           : '—';
 
     return {
       id: o.id,
-      shortRef: shortRef(o.id),
+      shortRef: buildOrderRef(o.id),
       createdAt: o.created_at,
       itemsLabel,
-      formatLabel,
+      formatLabel: lineFormatLabel,
       totalPrice: o.total_price,
       status: o.status as OrderStatus,
       paymentMethod: o.payment_method as PaymentMethod,
@@ -132,34 +120,12 @@ export async function loadAdminOrder(
     | { name: string; shipping_address: unknown }
     | null;
 
-  const rawItems = (data.order_items ?? []) as Array<{
-    id: string;
-    format: string;
-    quantity: number;
-    unit_price: number;
-    allocated_at: string | null;
-    batch_id: string | null;
-    species_id: string;
-    species: { common_name: string; latin_name: string } | null;
-  }>;
-
-  const items: OrderItem[] = rawItems.map((it) => ({
-    id: it.id,
-    speciesId: it.species_id,
-    speciesCommonName: it.species?.common_name ?? 'Unknown species',
-    speciesLatinName: it.species?.latin_name ?? '',
-    format: it.format as FormatKey,
-    formatLabel: formatLabelFor(it.format),
-    quantity: it.quantity,
-    unitPrice: it.unit_price,
-    lineTotal: it.unit_price * it.quantity,
-    allocatedAt: it.allocated_at,
-    batchId: it.batch_id,
-  }));
+  const rawItems = (data.order_items ?? []) as RawOrderItem[];
+  const items = mapOrderItems(rawItems);
 
   return {
     id: data.id,
-    shortRef: shortRef(data.id),
+    shortRef: buildOrderRef(data.id),
     status: data.status as OrderStatus,
     paymentMethod: data.payment_method as PaymentMethod,
     dispatchDate: data.dispatch_date,
@@ -173,30 +139,4 @@ export async function loadAdminOrder(
     companyName: company?.name ?? '—',
     shippingAddress: parseShippingAddress(company?.shipping_address),
   };
-}
-
-function parseShippingAddress(raw: unknown): ShippingAddress | null {
-  if (!raw || typeof raw !== 'object') return null;
-  const r = raw as Record<string, unknown>;
-  const pick = (k: string): string | undefined =>
-    typeof r[k] === 'string' ? (r[k] as string) : undefined;
-  const street1 = pick('street1') ?? pick('line1');
-  const city = pick('city');
-  const country = pick('country');
-  // Treat "no useful address" as null so the UI can show a clear blocker.
-  if (!street1 || !city || !country) return null;
-  const addr: ShippingAddress = { street1, city, country };
-  const name = pick('name');
-  if (name) addr.name = name;
-  const street2 = pick('street2') ?? pick('line2');
-  if (street2) addr.street2 = street2;
-  const state = pick('state') ?? pick('region');
-  if (state) addr.state = state;
-  const zip = pick('zip') ?? pick('postal_code') ?? pick('postcode');
-  if (zip) addr.zip = zip;
-  const phone = pick('phone');
-  if (phone) addr.phone = phone;
-  const email = pick('email');
-  if (email) addr.email = email;
-  return addr;
 }

@@ -19,33 +19,11 @@
 import 'server-only';
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
-import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { requireCompanyAdmin } from '@/lib/auth/require-company';
 
 const ROLES = ['admin', 'buyer'] as const;
 type Role = (typeof ROLES)[number];
-
-type Guard =
-  | { ok: true; userId: string; companyId: string }
-  | { ok: false; error: string };
-
-async function requireAdmin(): Promise<Guard> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: 'Sign in required.' };
-  const { data: link } = await supabase
-    .from('company_users')
-    .select('company_id, role')
-    .eq('user_id', user.id)
-    .maybeSingle();
-  if (!link) return { ok: false, error: 'No company membership.' };
-  if (link.role !== 'admin') {
-    return { ok: false, error: 'Admin role required.' };
-  }
-  return { ok: true, userId: user.id, companyId: link.company_id };
-}
 
 const EMAIL_RX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -68,7 +46,7 @@ export async function inviteTeamMember(
   }
   const { email, role } = parsed.data;
 
-  const guard = await requireAdmin();
+  const guard = await requireCompanyAdmin();
   if (!guard.ok) return guard;
 
   const admin = createAdminClient();
@@ -108,7 +86,7 @@ export async function setTeamMemberRole(
   if (!parsed.success) return { ok: false, error: 'Invalid input.' };
   const { membershipId, role } = parsed.data;
 
-  const guard = await requireAdmin();
+  const guard = await requireCompanyAdmin();
   if (!guard.ok) return guard;
 
   const admin = createAdminClient();
@@ -151,7 +129,7 @@ export async function removeTeamMember(
   if (!parsed.success) return { ok: false, error: 'Invalid input.' };
   const { membershipId } = parsed.data;
 
-  const guard = await requireAdmin();
+  const guard = await requireCompanyAdmin();
   if (!guard.ok) return guard;
 
   const admin = createAdminClient();

@@ -18,5 +18,11 @@
   "devDependencies": {
     "turbo": "^2.5.0",
     "typescript": "^5.8.0"
+  },
+  "pnpm": {
+    "overrides": {
+      "postcss": "^8.5.10",
+      "uuid": "^14.0.0"
+    }
   }
 }
