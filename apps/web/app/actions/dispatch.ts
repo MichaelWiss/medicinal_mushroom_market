@@ -19,35 +19,26 @@
 import 'server-only';
 import { revalidatePath } from 'next/cache';
 import { canTransitionOrder } from '@repo/shared';
-import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { requireOps } from '@/lib/auth/require-ops';
 import { createLabel, type ShippoAddress } from '@/lib/shippo/labels';
 import { registerTracking } from '@/lib/shippo/tracking';
 import { ShippoError } from '@/lib/shippo/client';
 import { getCompanyEmails } from '@/lib/email/recipients';
 import { sendDispatchNotice, orderUrl } from '@/lib/email/send';
-import type { ShippingAddress } from '@/lib/data/admin-orders';
+import { parseShippingAddress } from '@/lib/data/shipping-address';
+import { orderRef } from '@/lib/format/refs';
+import type { ShippingAddress } from '@repo/shared';
 
 export type DispatchActionResult =
   | { ok: true; status: string; trackingNumber?: string; labelUrl?: string }
   | { ok: false; error: string; code?: string };
 
-async function requireSignedInOps(): Promise<
-  | { ok: true; userId: string }
-  | { ok: false; error: string }
-> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: 'Sign in required.' };
-  return { ok: true, userId: user.id };
-}
 
 export async function markOrderPicking(
   orderId: string,
 ): Promise<DispatchActionResult> {
-  const guard = await requireSignedInOps();
+  const guard = await requireOps();
   if (!guard.ok) return guard;
 
   const admin = createAdminClient();
@@ -156,7 +147,7 @@ function shippingAddressToShippo(
 export async function generateLabelForOrder(
   input: GenerateLabelInput,
 ): Promise<DispatchActionResult> {
-  const guard = await requireSignedInOps();
+  const guard = await requireOps();
   if (!guard.ok) return guard;
 
   const admin = createAdminClient();
@@ -182,7 +173,7 @@ export async function generateLabelForOrder(
   const company = order.companies as
     | { name: string; shipping_address: unknown }
     | null;
-  const rawAddr = (company?.shipping_address ?? null) as ShippingAddress | null;
+  const shippingAddress = parseShippingAddress(company?.shipping_address);
 
   const fromAddress = readWarehouseAddress();
   if (!fromAddress) {
@@ -194,8 +185,8 @@ export async function generateLabelForOrder(
     };
   }
 
-  const toAddress = rawAddr
-    ? shippingAddressToShippo(rawAddr, company?.name ?? 'Customer')
+  const toAddress = shippingAddress
+    ? shippingAddressToShippo(shippingAddress, company?.name ?? 'Customer')
     : null;
   if (!toAddress) {
     return {
@@ -277,7 +268,7 @@ export async function generateLabelForOrder(
     await Promise.all(
       recipients.map((to) =>
         sendDispatchNotice(to, {
-          orderRef: `MYC-${order.id.slice(0, 8).toUpperCase()}`,
+          orderRef: orderRef(order.id),
           trackingNumber: label.trackingNumber,
           dispatchDate: order.dispatch_date,
           orderUrl: orderUrl(order.id),

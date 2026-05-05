@@ -9,8 +9,10 @@
 
 import 'server-only';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { batchRef as buildBatchRef } from '@/lib/format/refs';
+import type { ContaminationResult } from '@repo/shared';
 
-export type ContaminationResult = 'pending' | 'pass' | 'fail';
+export type { ContaminationResult };
 
 export type AdminBatchRow = {
   id: string;
@@ -29,8 +31,8 @@ export type AdminBatchRow = {
   createdAt: string;
 };
 
-const shortBatchRef = (uuid: string) =>
-  `BCH-${uuid.slice(0, 8).toUpperCase()}`;
+// Local alias kept for readability at call sites.
+const shortBatchRef = buildBatchRef;
 
 export async function loadAdminBatches(filter?: {
   contaminationCheck?: ContaminationResult;

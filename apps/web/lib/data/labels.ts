@@ -13,6 +13,7 @@ import type {
   ContaminationResult,
   SubscriptionFrequency,
 } from '@repo/shared';
+import { FMT } from '@/lib/data/species';
 
 export const ORDER_STATUS_LABEL: Record<OrderStatus, string> = {
   pending: 'Pending',
@@ -47,3 +48,7 @@ export const FREQUENCY_LABEL: Record<SubscriptionFrequency, string> = {
   biweekly: 'Biweekly',
   monthly: 'Monthly',
 };
+
+export function formatLabel(key: string): string {
+  return (FMT as Record<string, string>)[key] ?? key;
+}

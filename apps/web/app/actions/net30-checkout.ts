@@ -26,15 +26,23 @@ import { renderToBuffer } from '@react-pdf/renderer';
 import {
   cartSchema,
   calculateLinePrice,
-  type CartItemInput,
   type CompanyTier,
 } from '@repo/shared';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { isDispatchAllowed } from '@/lib/checkout/dispatch';
+import { validateCart } from '@/lib/checkout/validate-cart';
+import { allocateOrderLines } from '@/lib/checkout/allocate-order';
+import { requireCompany } from '@/lib/auth/require-company';
+import { getCompanyEmails } from '@/lib/email/recipients';
 import { InvoicePdf, type InvoiceLine } from '@/lib/invoices/InvoicePdf';
 import { sendInvoice } from '@/lib/email/send';
 import { orderUrl as buildOrderUrl } from '@/lib/email/send';
+import {
+  formatShippingAddress,
+  parseShippingAddress,
+} from '@/lib/data/shipping-address';
+import { formatLabel } from '@/lib/data/labels';
+import { invoiceRef } from '@/lib/format/refs';
 import { track } from '@/lib/posthog/track';
 
 const inputSchema = z.object({
@@ -59,13 +67,6 @@ export type Net30ErrorCode =
   | 'allocation_failed'
   | 'db_error';
 
-const FORMAT_LABEL: Record<CartItemInput['format'], string> = {
-  fresh: 'Fresh fruiting body',
-  powder: 'Dried powder',
-  spawn: 'Grain spawn',
-  culture: 'Liquid culture',
-  block: 'Substrate block',
-};
 
 export async function startNet30Checkout(
   raw: Net30CheckoutInput,
@@ -79,103 +80,59 @@ export async function startNet30Checkout(
     return { ok: false, code: 'empty_cart', error: 'Cart is empty.' };
   }
 
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user || !user.email) {
+  const ctx = await requireCompany();
+  if (!ctx.ok) {
+    return {
+      ok: false,
+      code: ctx.code === 'unauthenticated' ? 'unauthenticated' : 'no_company',
+      error:
+        ctx.code === 'unauthenticated' ? 'Sign in to check out.' : ctx.error,
+    };
+  }
+  if (!ctx.email) {
     return { ok: false, code: 'unauthenticated', error: 'Sign in to check out.' };
   }
+  const { userId, email: userEmail, companyId, tier } = ctx;
 
-  const { data: membership, error: memErr } = await supabase
-    .from('company_users')
-    .select('company_id, companies(id, name, tier, net30_enabled, shipping_address)')
-    .eq('user_id', user.id)
+  const supabase = await createClient();
+
+  // Net-30 needs the company name + address + eligibility flag, which the
+  // shared `requireCompany` helper does not load. Pull them now.
+  const { data: companyRow, error: companyErr } = await supabase
+    .from('companies')
+    .select('id, name, net30_enabled, shipping_address')
+    .eq('id', companyId)
     .maybeSingle();
-  if (memErr || !membership?.company_id) {
-    return { ok: false, code: 'no_company', error: 'No company linked to this account.' };
+  if (companyErr || !companyRow) {
+    return { ok: false, code: 'db_error', error: 'Company lookup failed.' };
   }
-  const company = membership.companies as {
-    id: string;
-    name: string;
-    tier: CompanyTier;
-    net30_enabled: boolean;
-    shipping_address: Record<string, unknown> | null;
-  } | null;
-  if (!company?.net30_enabled) {
+  if (!companyRow.net30_enabled) {
     return {
       ok: false,
       code: 'not_eligible',
       error: 'Net-30 payment is not enabled for this account.',
     };
   }
-  const companyId = membership.company_id;
-  const tier = (company.tier ?? 'spot') as CompanyTier;
+  const company = {
+    id: companyRow.id,
+    name: companyRow.name,
+    net30_enabled: companyRow.net30_enabled,
+    shipping_address: parseShippingAddress(companyRow.shipping_address),
+  };
 
-  // Validate stock + dispatch window.
-  const speciesIds = Array.from(new Set(items.map((i) => i.speciesId)));
-  const [{ data: speciesRows, error: spErr }, { data: batchRows, error: bErr }] =
-    await Promise.all([
-      supabase
-        .from('species')
-        .select('id, common_name, dispatch_window')
-        .in('id', speciesIds),
-      supabase
-        .from('batches')
-        .select('species_id, available_units, contamination_check')
-        .in('species_id', speciesIds)
-        .eq('contamination_check', 'pass'),
-    ]);
-  if (spErr || bErr || !speciesRows) {
-    return { ok: false, code: 'db_error', error: 'Could not validate cart.' };
+  // Validate stock + dispatch window + resolve trusted lines.
+  const validation = await validateCart(supabase, items, dispatchDate);
+  if (!validation.ok) {
+    return { ok: false, code: validation.code, error: validation.error };
   }
-  const speciesById = new Map(speciesRows.map((s) => [s.id, s]));
-  const stockBySpecies = new Map<string, number>();
-  for (const b of batchRows ?? []) {
-    stockBySpecies.set(
-      b.species_id,
-      (stockBySpecies.get(b.species_id) ?? 0) + (b.available_units ?? 0),
-    );
-  }
-  const dispatchUTC = new Date(`${dispatchDate}T00:00:00.000Z`);
-  if (Number.isNaN(dispatchUTC.getTime())) {
-    return { ok: false, code: 'invalid_dispatch_date', error: 'Invalid dispatch date.' };
-  }
-  const requestedBySpecies = new Map<string, number>();
-  for (const it of items) {
-    requestedBySpecies.set(
-      it.speciesId,
-      (requestedBySpecies.get(it.speciesId) ?? 0) + it.quantity,
-    );
-  }
-  for (const [sid, qty] of requestedBySpecies) {
-    const sp = speciesById.get(sid);
-    if (!sp) {
-      return { ok: false, code: 'invalid_input', error: 'Unknown species in cart.' };
-    }
-    const stock = stockBySpecies.get(sid) ?? 0;
-    if (stock < qty) {
-      return {
-        ok: false,
-        code: 'insufficient_stock',
-        error: `Insufficient stock for ${sp.common_name}. Available: ${stock}.`,
-      };
-    }
-    if (!isDispatchAllowed(sp.dispatch_window, dispatchUTC)) {
-      return {
-        ok: false,
-        code: 'invalid_dispatch_date',
-        error: `${sp.common_name} cannot dispatch on the selected date.`,
-      };
-    }
-  }
+  const { trustedLines } = validation;
 
-  // Compute discounted unit prices + total.
-  const linePrices = items.map((it) => {
-    const lineTotal = calculateLinePrice(it.unitPrice, it.quantity, tier);
+  // Compute discounted unit prices + total from the trusted lines.
+  const linePrices = trustedLines.map((l) => {
+    const lineTotal = calculateLinePrice(l.unitPricePence, l.quantity, tier);
     return {
-      ...it,
-      unitPriceDiscounted: Math.round(lineTotal / it.quantity),
+      ...l,
+      unitPriceDiscounted: Math.round(lineTotal / l.quantity),
       lineTotal,
     };
   });
@@ -203,46 +160,24 @@ export async function startNet30Checkout(
   }
 
   // Allocate stock per line up-front and write order_items.
-  for (const line of linePrices) {
-    const { data: batchId, error: allocErr } = await admin.rpc('allocate_batch', {
-      p_species_id: line.speciesId,
-      p_qty: line.quantity,
-    });
-    if (allocErr || !batchId) {
-      // Rollback: best effort. Delete order_items + order.
-      await admin.from('order_items').delete().eq('order_id', order.id);
-      await admin.from('orders').delete().eq('id', order.id);
-      return {
-        ok: false,
-        code: 'allocation_failed',
-        error:
-          allocErr?.message ??
-          `Allocation failed for ${line.speciesName}. Stock may have shifted.`,
-      };
-    }
-    const { error: itemErr } = await admin.from('order_items').insert({
-      order_id: order.id,
-      species_id: line.speciesId,
-      batch_id: batchId,
-      format: line.format,
-      quantity: line.quantity,
-      unit_price: line.unitPriceDiscounted,
-      allocated_at: new Date().toISOString(),
-    });
-    if (itemErr) {
-      await admin.from('order_items').delete().eq('order_id', order.id);
-      await admin.from('orders').delete().eq('id', order.id);
-      return {
-        ok: false,
-        code: 'db_error',
-        error: `Could not write order line: ${itemErr.message}`,
-      };
-    }
+  const allocation = await allocateOrderLines(
+    admin,
+    order.id,
+    linePrices.map((l) => ({
+      speciesId: l.speciesId,
+      speciesName: l.speciesName,
+      format: l.format,
+      quantity: l.quantity,
+      unitPrice: l.unitPriceDiscounted,
+    })),
+  );
+  if (!allocation.ok) {
+    return { ok: false, code: allocation.code, error: allocation.error };
   }
 
   // Render invoice PDF + send email. Best-effort; failures here do
   // NOT roll back the confirmed order — ops can resend the invoice.
-  const invoiceNumber = `INV-${order.id.slice(0, 8).toUpperCase()}`;
+  const invoiceNumber = invoiceRef(order.id);
   const issuedDate = new Date(order.created_at).toISOString().slice(0, 10);
   const due = new Date(order.created_at);
   due.setUTCDate(due.getUTCDate() + 30);
@@ -250,7 +185,7 @@ export async function startNet30Checkout(
 
   const invoiceLines: InvoiceLine[] = linePrices.map((l) => ({
     speciesName: l.speciesName,
-    formatLabel: FORMAT_LABEL[l.format],
+    formatLabel: formatLabel(l.format),
     quantity: l.quantity,
     unitPricePence: l.unitPriceDiscounted,
   }));
@@ -261,7 +196,7 @@ export async function startNet30Checkout(
         invoiceNumber,
         orderId: order.id,
         companyName: company.name,
-        buyerEmail: user.email,
+        buyerEmail: userEmail,
         issuedDate,
         dueDate,
         lines: invoiceLines,
@@ -271,7 +206,7 @@ export async function startNet30Checkout(
     );
     const pdfBase64 = pdfBuffer.toString('base64');
     const recipients = await getCompanyEmails(companyId);
-    for (const to of recipients.length > 0 ? recipients : [user.email]) {
+    for (const to of recipients.length > 0 ? recipients : [userEmail]) {
       await sendInvoice(
         to,
         {
@@ -296,7 +231,7 @@ export async function startNet30Checkout(
   // Net-30 confirms inline (no Stripe round-trip), so emit both events.
   track(
     'checkout_started',
-    user.id,
+    userId,
     {
       orderId: order.id,
       paymentMethod: 'net30',
@@ -307,7 +242,7 @@ export async function startNet30Checkout(
   );
   track(
     'checkout_completed',
-    user.id,
+    userId,
     {
       orderId: order.id,
       paymentMethod: 'net30',
@@ -319,24 +254,5 @@ export async function startNet30Checkout(
   return { ok: true, orderId: order.id, invoiceNumber };
 }
 
-function formatShippingAddress(addr: Record<string, unknown> | null): string | undefined {
-  if (!addr || typeof addr !== 'object') return undefined;
-  const parts = ['line1', 'line2', 'city', 'postcode', 'country']
-    .map((k) => (addr as Record<string, unknown>)[k])
-    .filter((v): v is string => typeof v === 'string' && v.length > 0);
-  return parts.length > 0 ? parts.join(', ') : undefined;
-}
 
-async function getCompanyEmails(companyId: string): Promise<string[]> {
-  const admin = createAdminClient();
-  const { data: links } = await admin
-    .from('company_users')
-    .select('user_id')
-    .eq('company_id', companyId);
-  const out: string[] = [];
-  for (const link of links ?? []) {
-    const { data } = await admin.auth.admin.getUserById(link.user_id);
-    if (data?.user?.email) out.push(data.user.email);
-  }
-  return out;
-}
+// `getCompanyEmails` is imported from `lib/email/recipients` above.

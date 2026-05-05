@@ -6,6 +6,7 @@
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
+import { resolveSiteOrigin } from '@/lib/auth/origin';
 import { loadTeamMembers } from '@/lib/data/team';
 import { TeamTable } from './TeamTable';
 
@@ -33,10 +34,12 @@ export default async function TeamPage() {
   // Capture the request origin so the client invite form can hand
   // it back to the Server Action (needed to build the magic-link
   // redirect target without leaking it from the client bundle).
+  // Goes through the trusted-origin resolver so a poisoned Host can't
+  // redirect a buyer to an attacker domain.
   const hdrs = await headers();
-  const origin =
-    hdrs.get('origin') ??
-    `https://${hdrs.get('host') ?? 'localhost:3000'}`;
+  const origin = resolveSiteOrigin({
+    headers: { get: (k: string) => hdrs.get(k) },
+  });
 
   return (
     <section className="px-11 py-10">

@@ -12,6 +12,7 @@ import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { requireCompany } from '@/lib/auth/require-company';
 import { nextMonday, toISODate } from '@/lib/checkout/dispatch';
 import { getOrCreateStripeCustomer } from '@/lib/stripe/customer';
 import {
@@ -22,38 +23,6 @@ import {
 } from '@/lib/stripe/subscriptions';
 import { presentationFor } from '@/lib/data/species-presentation';
 import { track } from '@/lib/posthog/track';
-import type { CompanyTier } from '@repo/shared';
-
-// ── shared auth/company resolution ─────────────────────────────
-
-async function requireCompany(): Promise<{
-  userId: string;
-  email: string | null;
-  companyId: string;
-  tier: CompanyTier;
-}> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) throw new Error('Not signed in');
-
-  const { data: link, error } = await supabase
-    .from('company_users')
-    .select('company_id, companies:company_id(tier)')
-    .eq('user_id', user.id)
-    .maybeSingle();
-  if (error || !link) throw new Error('No company association');
-  const co = link.companies as { tier?: CompanyTier } | null | undefined;
-  return {
-    userId: user.id,
-    email: user.email ?? null,
-    companyId: link.company_id,
-    tier: (co?.tier ?? 'spot') as CompanyTier,
-  };
-}
-
-// ── createSubscription ────────────────────────────────────────
 
 const createSchema = z.object({
   speciesId: z.string().uuid(),
@@ -74,12 +43,8 @@ export async function createSubscription(
   }
   const input = parsed.data;
 
-  let ctx: Awaited<ReturnType<typeof requireCompany>>;
-  try {
-    ctx = await requireCompany();
-  } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : 'auth failed' };
-  }
+  const ctx = await requireCompany();
+  if (!ctx.ok) return { ok: false, error: ctx.error };
 
   // Resolve species name + list price for the Stripe Product/Price.
   const supabase = await createClient();
@@ -169,12 +134,8 @@ async function setActive(
   subscriptionId: string,
   active: boolean,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  let ctx: Awaited<ReturnType<typeof requireCompany>>;
-  try {
-    ctx = await requireCompany();
-  } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : 'auth failed' };
-  }
+  const ctx = await requireCompany();
+  if (!ctx.ok) return { ok: false, error: ctx.error };
   const supabase = await createClient();
   // Read with RLS to prove ownership before the admin write.
   const { data: row, error: readErr } = await supabase
@@ -222,12 +183,8 @@ export async function setSubscriptionQuantity(
   if (!Number.isInteger(quantity) || quantity < 1 || quantity > 10000) {
     return { ok: false, error: 'Invalid quantity' };
   }
-  let ctx: Awaited<ReturnType<typeof requireCompany>>;
-  try {
-    ctx = await requireCompany();
-  } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : 'auth failed' };
-  }
+  const ctx = await requireCompany();
+  if (!ctx.ok) return { ok: false, error: ctx.error };
   const supabase = await createClient();
   const { data: row, error: readErr } = await supabase
     .from('subscriptions')
@@ -263,12 +220,8 @@ export async function setSubscriptionQuantity(
 export async function cancelSubscription(
   subscriptionId: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  let ctx: Awaited<ReturnType<typeof requireCompany>>;
-  try {
-    ctx = await requireCompany();
-  } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : 'auth failed' };
-  }
+  const ctx = await requireCompany();
+  if (!ctx.ok) return { ok: false, error: ctx.error };
   const supabase = await createClient();
   const { data: row, error: readErr } = await supabase
     .from('subscriptions')

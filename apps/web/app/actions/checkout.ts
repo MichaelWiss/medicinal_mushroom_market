@@ -23,12 +23,15 @@ import { z } from 'zod';
 import {
   cartSchema,
   calculateLinePrice,
-  type CartItemInput,
   type CompanyTier,
 } from '@repo/shared';
 import { createClient } from '@/lib/supabase/server';
 import { getStripe } from '@/lib/stripe/server';
-import { isDispatchAllowed } from '@/lib/checkout/dispatch';
+import { validateCart } from '@/lib/checkout/validate-cart';
+import type { TrustedLine } from '@/lib/checkout/pricing';
+import { resolveSiteOrigin } from '@/lib/auth/origin';
+import { requireCompany } from '@/lib/auth/require-company';
+import { formatLabel } from '@/lib/data/labels';
 import { track } from '@/lib/posthog/track';
 
 const inputSchema = z.object({
@@ -71,120 +74,31 @@ export async function startCheckout(
     return { ok: false, code: 'empty_cart', error: 'Cart is empty.' };
   }
 
-  // 2. Auth.
+  // 2. Auth + company lookup via the shared guard.
+  const ctx = await requireCompany();
+  if (!ctx.ok) {
+    return {
+      ok: false,
+      code: ctx.code === 'unauthenticated' ? 'unauthenticated' : 'no_company',
+      error:
+        ctx.code === 'unauthenticated' ? 'Sign in to check out.' : ctx.error,
+    };
+  }
+  const { userId, companyId, tier } = ctx;
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) {
-    return {
-      ok: false,
-      code: 'unauthenticated',
-      error: 'Sign in to check out.',
-    };
+
+  // 4. Per-line live stock + dispatch-window validation + trusted-line
+  //    resolution (server-derived prices). Client-supplied `unitPrice`
+  //    and `speciesName` are deliberately discarded.
+  const validation = await validateCart(supabase, items, dispatchDate);
+  if (!validation.ok) {
+    return { ok: false, code: validation.code, error: validation.error };
   }
+  const { trustedLines } = validation;
 
-  // 3. Resolve company + tier.
-  const { data: membership, error: memErr } = await supabase
-    .from('company_users')
-    .select('company_id, companies(id, tier)')
-    .eq('user_id', user.id)
-    .maybeSingle();
-
-  if (memErr || !membership?.company_id) {
-    return {
-      ok: false,
-      code: 'no_company',
-      error: 'No company is linked to this account.',
-    };
-  }
-  const companyId = membership.company_id;
-  const tier =
-    ((membership.companies as { tier: CompanyTier } | null)?.tier ?? 'spot') as
-      CompanyTier;
-
-  // 4. Per-line live stock + dispatch-window validation.
-  const speciesIds = Array.from(new Set(items.map((i) => i.speciesId)));
-
-  const [{ data: speciesRows, error: speciesErr },
-         { data: batchRows, error: batchErr }] = await Promise.all([
-    supabase
-      .from('species')
-      .select('id, common_name, dispatch_window')
-      .in('id', speciesIds),
-    supabase
-      .from('batches')
-      .select('species_id, available_units, contamination_check')
-      .in('species_id', speciesIds)
-      .eq('contamination_check', 'pass'),
-  ]);
-
-  if (speciesErr || batchErr || !speciesRows) {
-    return {
-      ok: false,
-      code: 'db_error',
-      error: 'Could not validate cart against current stock.',
-    };
-  }
-
-  const speciesById = new Map(speciesRows.map((s) => [s.id, s]));
-  const stockBySpecies = new Map<string, number>();
-  for (const b of batchRows ?? []) {
-    stockBySpecies.set(
-      b.species_id,
-      (stockBySpecies.get(b.species_id) ?? 0) + (b.available_units ?? 0),
-    );
-  }
-
-  const dispatchUTC = new Date(`${dispatchDate}T00:00:00.000Z`);
-  if (Number.isNaN(dispatchUTC.getTime())) {
-    return {
-      ok: false,
-      code: 'invalid_dispatch_date',
-      error: 'Invalid dispatch date.',
-    };
-  }
-
-  // Aggregate quantity per species for stock check (a species may appear
-  // in multiple lines via different formats).
-  const requestedBySpecies = new Map<string, number>();
-  for (const it of items) {
-    requestedBySpecies.set(
-      it.speciesId,
-      (requestedBySpecies.get(it.speciesId) ?? 0) + it.quantity,
-    );
-  }
-
-  for (const [speciesId, requested] of requestedBySpecies) {
-    const sp = speciesById.get(speciesId);
-    if (!sp) {
-      return {
-        ok: false,
-        code: 'invalid_input',
-        error: 'Unknown species in cart.',
-      };
-    }
-    const stock = stockBySpecies.get(speciesId) ?? 0;
-    if (stock < requested) {
-      return {
-        ok: false,
-        code: 'insufficient_stock',
-        error: `Insufficient stock for ${sp.common_name}. Available: ${stock}.`,
-      };
-    }
-    if (!isDispatchAllowed(sp.dispatch_window, dispatchUTC)) {
-      return {
-        ok: false,
-        code: 'invalid_dispatch_date',
-        error: `${sp.common_name} cannot dispatch on the selected date (allowed: ${sp.dispatch_window.join(', ')}).`,
-      };
-    }
-  }
-
-  // 5. Build per-line discounted unit amounts (rounded so Stripe ↔ DB
-  //    stay in sync). The DB `total_price` mirrors what Stripe will
-  //    actually charge.
-  const stripeLines = items.map((it) => buildStripeLine(it, tier));
+  // 5. Build per-line discounted unit amounts. The DB `total_price`
+  //    mirrors what Stripe will actually charge.
+  const stripeLines = trustedLines.map((l) => buildStripeLine(l, tier));
   const totalPrice = stripeLines.reduce(
     (sum, l) => sum + l.unit_amount * l.quantity,
     0,
@@ -212,15 +126,16 @@ export async function startCheckout(
   }
 
   const { error: itemsErr } = await supabase.from('order_items').insert(
-    items.map((it) => ({
+    trustedLines.map((l) => ({
       order_id: order.id,
-      species_id: it.speciesId,
-      format: it.format,
-      quantity: it.quantity,
+      species_id: l.speciesId,
+      format: l.format,
+      quantity: l.quantity,
       // Store the discounted unit price so the DB total reconciles with
       // Stripe even if discounts shift between checkout and webhook.
+      // Computed from the trusted (server-derived) per-unit price.
       unit_price: Math.round(
-        calculateLinePrice(it.unitPrice, it.quantity, tier) / it.quantity,
+        calculateLinePrice(l.unitPricePence, l.quantity, tier) / l.quantity,
       ),
     })),
   );
@@ -295,7 +210,7 @@ export async function startCheckout(
   // once the session resolves.
   track(
     'checkout_started',
-    user.id,
+    userId,
     {
       orderId: order.id,
       paymentMethod: 'card',
@@ -313,38 +228,26 @@ export async function startCheckout(
 // ── helpers ───────────────────────────────────────────────────
 
 function buildStripeLine(
-  it: CartItemInput,
+  l: TrustedLine,
   tier: CompanyTier,
 ): { name: string; quantity: number; unit_amount: number } {
-  const totalLine = calculateLinePrice(it.unitPrice, it.quantity, tier);
+  const totalLine = calculateLinePrice(l.unitPricePence, l.quantity, tier);
   // Round-half-up at the per-unit level; pence-level rounding error is
   // ≤ qty/2 across the order which is acceptable for a Phase 3 stub.
-  const unitAmount = Math.round(totalLine / it.quantity);
+  const unitAmount = Math.round(totalLine / l.quantity);
   return {
-    name: `${it.speciesName} — ${formatLabel(it.format)}`,
-    quantity: it.quantity,
+    name: `${l.speciesName} — ${formatLabel(l.format)}`,
+    quantity: l.quantity,
     unit_amount: unitAmount,
   };
 }
 
-function formatLabel(f: CartItemInput['format']): string {
-  switch (f) {
-    case 'fresh':   return 'Fresh fruiting body';
-    case 'powder':  return 'Dried powder';
-    case 'spawn':   return 'Grain spawn';
-    case 'culture': return 'Liquid culture';
-    case 'block':   return 'Substrate block';
-  }
-}
-
 async function resolveOrigin(): Promise<string> {
-  // Prefer an explicit env so success/cancel URLs work behind tunnels.
-  if (process.env.NEXT_PUBLIC_SITE_URL) {
-    return process.env.NEXT_PUBLIC_SITE_URL.replace(/\/+$/, '');
-  }
+  // Delegate to the shared trusted-origin resolver. In production this
+  // requires NEXT_PUBLIC_SITE_URL; in dev it falls back to a small
+  // host allow-list so Stripe success/cancel URLs behave the same way
+  // as magic-link redirects.
   const { headers } = await import('next/headers');
   const h = await headers();
-  const host = h.get('x-forwarded-host') ?? h.get('host') ?? 'localhost:3000';
-  const proto = h.get('x-forwarded-proto') ?? 'http';
-  return `${proto}://${host}`;
+  return resolveSiteOrigin({ headers: { get: (k: string) => h.get(k) } });
 }

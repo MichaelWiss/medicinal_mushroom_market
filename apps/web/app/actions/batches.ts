@@ -23,8 +23,8 @@
 
 import 'server-only';
 import { revalidatePath } from 'next/cache';
-import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { requireOps } from '@/lib/auth/require-ops';
 import type { ContaminationResult } from '@/lib/data/admin-batches';
 
 export type BatchActionResult =
@@ -34,17 +34,6 @@ export type BatchActionResult =
 const COA_BUCKET = 'coa';
 const COA_MAX_BYTES = 50 * 1024 * 1024; // matches the bucket file_size_limit
 
-async function requireSignedInOps(): Promise<
-  | { ok: true; userId: string }
-  | { ok: false; error: string }
-> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: 'Sign in required.' };
-  return { ok: true, userId: user.id };
-}
 
 // ── contamination ────────────────────────────────────────────
 
@@ -52,7 +41,7 @@ export async function setContaminationResult(
   batchId: string,
   next: ContaminationResult,
 ): Promise<BatchActionResult> {
-  const guard = await requireSignedInOps();
+  const guard = await requireOps();
   if (!guard.ok) return guard;
 
   if (next === 'pending') {
@@ -107,7 +96,7 @@ export async function setAvailableUnits(
   batchId: string,
   units: number,
 ): Promise<BatchActionResult> {
-  const guard = await requireSignedInOps();
+  const guard = await requireOps();
   if (!guard.ok) return guard;
 
   if (!Number.isFinite(units) || !Number.isInteger(units) || units < 0) {
@@ -136,7 +125,7 @@ export async function uploadCoa(
   batchId: string,
   formData: FormData,
 ): Promise<BatchActionResult> {
-  const guard = await requireSignedInOps();
+  const guard = await requireOps();
   if (!guard.ok) return guard;
 
   const file = formData.get('file');

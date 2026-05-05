@@ -8,19 +8,14 @@
 
 import 'server-only';
 import { createClient } from '@/lib/supabase/server';
-import { FMT, type FormatKey } from '@/lib/data/species';
+import { formatLabel } from '@/lib/data/labels';
+import { mapOrderItems, type RawOrderItem, type OrderItem } from '@/lib/data/order-items';
+import { orderRef as buildOrderRef } from '@/lib/format/refs';
+import type { OrderStatus, PaymentMethod } from '@repo/shared';
 
-const shortRef = (uuid: string) => `MYC-${uuid.slice(0, 8).toUpperCase()}`;
-
-export type OrderStatus =
-  | 'pending'
-  | 'confirmed'
-  | 'picking'
-  | 'dispatched'
-  | 'delivered'
-  | 'cancelled';
-
-export type PaymentMethod = 'card' | 'net30';
+// Re-export for back-compat with the page files that already import
+// these type names from this module.
+export type { OrderStatus, PaymentMethod, OrderItem };
 
 export type OrderHistoryRow = {
   id: string;
@@ -35,19 +30,6 @@ export type OrderHistoryRow = {
   dispatchDate: string | null;
 };
 
-export type OrderItem = {
-  id: string;
-  speciesId: string;
-  speciesCommonName: string;
-  speciesLatinName: string;
-  format: FormatKey;
-  formatLabel: string;
-  quantity: number;
-  unitPrice: number;
-  lineTotal: number;
-  allocatedAt: string | null;
-  batchId: string | null;
-};
 
 export type OrderDetail = {
   id: string;
@@ -63,8 +45,6 @@ export type OrderDetail = {
   items: OrderItem[];
 };
 
-const formatLabelFor = (key: string): string =>
-  (FMT as Record<string, string>)[key] ?? key;
 
 /**
  * Lists every order for the signed-in company, newest first. Returns
@@ -108,19 +88,19 @@ export async function loadOrderHistory(): Promise<OrderHistoryRow[] | null> {
 
     // If every line shares a format, surface it; otherwise show "Mixed".
     const formats = [...new Set(items.map((it) => it.format))];
-    const formatLabel =
+    const lineFormatLabel =
       formats.length === 1
-        ? formatLabelFor(formats[0]!)
+        ? formatLabel(formats[0]!)
         : items.length > 0
           ? 'Mixed'
           : '—';
 
     return {
       id: o.id,
-      shortRef: shortRef(o.id),
+      shortRef: buildOrderRef(o.id),
       createdAt: o.created_at,
       itemsLabel,
-      formatLabel,
+      formatLabel: lineFormatLabel,
       totalPrice: o.total_price,
       status: o.status as OrderStatus,
       paymentMethod: o.payment_method as PaymentMethod,
@@ -156,34 +136,12 @@ export async function loadOrder(orderId: string): Promise<OrderDetail | null> {
   if (error) throw new Error(`loadOrder: ${error.message}`);
   if (!data) return null;
 
-  const rawItems = (data.order_items ?? []) as Array<{
-    id: string;
-    format: string;
-    quantity: number;
-    unit_price: number;
-    allocated_at: string | null;
-    batch_id: string | null;
-    species_id: string;
-    species: { common_name: string; latin_name: string } | null;
-  }>;
-
-  const items: OrderItem[] = rawItems.map((it) => ({
-    id: it.id,
-    speciesId: it.species_id,
-    speciesCommonName: it.species?.common_name ?? 'Unknown species',
-    speciesLatinName: it.species?.latin_name ?? '',
-    format: it.format as FormatKey,
-    formatLabel: formatLabelFor(it.format),
-    quantity: it.quantity,
-    unitPrice: it.unit_price,
-    lineTotal: it.unit_price * it.quantity,
-    allocatedAt: it.allocated_at,
-    batchId: it.batch_id,
-  }));
+  const rawItems = (data.order_items ?? []) as RawOrderItem[];
+  const items = mapOrderItems(rawItems);
 
   return {
     id: data.id,
-    shortRef: shortRef(data.id),
+    shortRef: buildOrderRef(data.id),
     status: data.status as OrderStatus,
     paymentMethod: data.payment_method as PaymentMethod,
     dispatchDate: data.dispatch_date,

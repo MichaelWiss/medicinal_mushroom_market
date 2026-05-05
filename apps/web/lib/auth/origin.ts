@@ -105,3 +105,8 @@ export function resolveSiteOrigin(req?: RequestLike): string {
   const proto = (headers?.get('x-forwarded-proto') ?? '').trim() || 'http';
   return `${proto}://${host}`;
 }
+
+/** Canonical site URL for background jobs/emails where no request is available. */
+export function getSiteUrl(): string {
+  return resolveSiteOrigin();
+}

@@ -159,6 +159,15 @@ insert into public.company_users (company_id, user_id, role) values
   ('c2000001-0000-0000-0000-000000000001', 'a2000001-0000-0000-0000-000000000001', 'buyer'),
   ('c2000001-0000-0000-0000-000000000001', 'a2000001-0000-0000-0000-000000000002', 'buyer');
 
+-- ── Ops users ─────────────────────────────────────────────────
+-- Allow-list of users with /console + ops Server Action access. The
+-- seeded admin@craftbrew.test user gets ops privileges so the dev
+-- console workflow keeps working out of the box. Real ops staff are
+-- added by inserting rows here (or via a future admin UI).
+insert into public.ops_users (user_id) values
+  ('a1000001-0000-0000-0000-000000000001')
+on conflict (user_id) do nothing;
+
 -- ── Species (12) ──────────────────────────────────────────────
 -- shelf_life_days is measured from inoculation_date.
 -- Fresh fruiting bodies (cold chain, short shelf life, Monday dispatch).

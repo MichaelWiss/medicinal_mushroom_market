@@ -1,7 +1,6 @@
 import type { MetadataRoute } from 'next';
 import { createAnonClient } from '@/lib/supabase/anon';
-
-const BASE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://myceliumco.com';
+const BASE_URL = (process.env.NEXT_PUBLIC_SITE_URL ?? 'https://myceliumco.com').replace(/\/+$/, '');
 
 export const revalidate = 3600; // regenerate hourly
 

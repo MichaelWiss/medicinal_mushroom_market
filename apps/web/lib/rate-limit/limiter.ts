@@ -56,9 +56,19 @@ export function getLimiters(): { anon: Limiter; authed: Limiter } {
     return cached;
   }
 
+  // Fail closed in production: the in-memory fallback is per-instance
+  // and gives essentially no protection at scale. Operators must wire
+  // Upstash credentials before deploying.
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error(
+      '[rate-limit] UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN must be set in production. ' +
+        'Refusing to fall back to the per-instance in-memory limiter.',
+    );
+  }
+
   // eslint-disable-next-line no-console
   console.warn(
-    '[rate-limit] UPSTASH_REDIS_REST_URL/TOKEN unset — using in-memory fallback (per-instance, not safe for production).',
+    '[rate-limit] UPSTASH_REDIS_REST_URL/TOKEN unset — using in-memory fallback (per-instance, dev/test only).',
   );
   cached = {
     anon: makeMemoryLimiter(10, 60_000),

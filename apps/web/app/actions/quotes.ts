@@ -17,13 +17,15 @@
 import 'server-only';
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
-import { quoteLineItemsSchema, type QuoteLineItemsInput } from '@repo/shared';
+import { quoteLineItemsSchema } from '@repo/shared';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { requireCompanyAdmin } from '@/lib/auth/require-company';
+import { getSiteUrl } from '@/lib/auth/origin';
+import { allocateOrderLines } from '@/lib/checkout/allocate-order';
 import { getCompanyEmails } from '@/lib/email/recipients';
 import { sendQuote as sendQuoteEmail, orderUrl } from '@/lib/email/send';
 
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'http://localhost:3000';
 
 const createSchema = z.object({
   companyId: z.string().uuid(),
@@ -40,28 +42,6 @@ export type CreateQuoteResult =
   | { ok: true; quoteId: string; status: 'draft' | 'sent' }
   | { ok: false; error: string };
 
-async function requireAdminFor(companyId: string): Promise<
-  | { ok: true; userId: string }
-  | { ok: false; error: string; code: 'unauthenticated' | 'forbidden' }
-> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { ok: false, code: 'unauthenticated', error: 'Sign in required.' };
-
-  const { data: link } = await supabase
-    .from('company_users')
-    .select('role, company_id')
-    .eq('user_id', user.id)
-    .eq('company_id', companyId)
-    .maybeSingle();
-  if (!link || link.role !== 'admin') {
-    return { ok: false, code: 'forbidden', error: 'Admin role required.' };
-  }
-  return { ok: true, userId: user.id };
-}
-
 export async function createQuote(
   raw: CreateQuoteInput,
 ): Promise<CreateQuoteResult> {
@@ -69,7 +49,7 @@ export async function createQuote(
   if (!parsed.success) return { ok: false, error: 'Invalid quote payload.' };
   const { companyId, lineItems, expiresAt, send } = parsed.data;
 
-  const guard = await requireAdminFor(companyId);
+  const guard = await requireCompanyAdmin(companyId);
   if (!guard.ok) return { ok: false, error: guard.error };
 
   const expiry =
@@ -107,7 +87,7 @@ export async function sendQuote(quoteId: string): Promise<{ ok: true } | { ok: f
     .maybeSingle();
   if (qErr || !quote) return { ok: false, error: 'Quote not found.' };
 
-  const guard = await requireAdminFor(quote.company_id);
+  const guard = await requireCompanyAdmin(quote.company_id);
   if (!guard.ok) return { ok: false, error: guard.error };
 
   if (quote.status !== 'draft') {
@@ -215,34 +195,19 @@ export async function approveQuote(quoteId: string): Promise<ApproveQuoteResult>
     };
   }
 
-  for (const line of lineItems.data) {
-    const { data: batchId, error: allocErr } = await admin.rpc('allocate_batch', {
-      p_species_id: line.speciesId,
-      p_qty: line.quantity,
-    });
-    if (allocErr || !batchId) {
-      await admin.from('order_items').delete().eq('order_id', order.id);
-      await admin.from('orders').delete().eq('id', order.id);
-      return {
-        ok: false,
-        code: 'allocation_failed',
-        error: `Allocation failed for ${line.speciesName}.`,
-      };
-    }
-    const { error: itemErr } = await admin.from('order_items').insert({
-      order_id: order.id,
-      species_id: line.speciesId,
-      batch_id: batchId,
-      format: line.format,
-      quantity: line.quantity,
-      unit_price: line.unitPrice,
-      allocated_at: new Date().toISOString(),
-    });
-    if (itemErr) {
-      await admin.from('order_items').delete().eq('order_id', order.id);
-      await admin.from('orders').delete().eq('id', order.id);
-      return { ok: false, code: 'db_error', error: itemErr.message };
-    }
+  const allocation = await allocateOrderLines(
+    admin,
+    order.id,
+    lineItems.data.map((l) => ({
+      speciesId: l.speciesId,
+      speciesName: l.speciesName,
+      format: l.format,
+      quantity: l.quantity,
+      unitPrice: l.unitPrice,
+    })),
+  );
+  if (!allocation.ok) {
+    return { ok: false, code: allocation.code, error: allocation.error };
   }
 
   await admin
@@ -266,7 +231,7 @@ async function emailQuoteToBuyer(
     console.warn('[quotes] no recipients for company', companyId);
     return;
   }
-  const url = `${SITE_URL.replace(/\/$/, '')}/quotes/${quoteId}`;
+  const url = `${getSiteUrl()}/quotes/${quoteId}`;
   for (const to of recipients) {
     await sendQuoteEmail(to, {
       quoteRef: quoteId,

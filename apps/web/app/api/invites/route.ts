@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { resolveSiteOrigin, UntrustedOriginError } from '@/lib/auth/origin';
 
 // POST /api/invites
 //   Body: { email: string, role?: 'buyer' | 'admin' }
@@ -81,7 +82,19 @@ export async function POST(request: NextRequest) {
 
   // ── Issue invite via service role ────────────────────────
   const admin = createAdminClient();
-  const origin = new URL(request.url).origin;
+  let origin: string;
+  try {
+    origin = resolveSiteOrigin(request);
+  } catch (err) {
+    if (err instanceof UntrustedOriginError) {
+      console.error('[api/invites]', err.message);
+      return NextResponse.json(
+        { error: 'Site origin not configured' },
+        { status: 500 },
+      );
+    }
+    throw err;
+  }
   const redirectTo = `${origin}/auth/callback?next=/orders`;
 
   const { data: invited, error: inviteError } =
